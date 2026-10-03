@@ -1,9 +1,17 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ProfesoresViewSet, RepresentantesLegalesViewSet, AlumnoRepresentanteViewSet, exportar_alumnos_representantes_csv, exportar_alumnos_representantes_excel, exportar_alumnos_representantes_pdf
+from .views import (
+    ProfesoresViewSet,
+    RepresentantesLegalesViewSet,
+    AlumnoRepresentanteViewSet,
+    exportar_alumnos_representantes_csv,
+    exportar_alumnos_representantes_excel,
+    exportar_alumnos_representantes_pdf
+)
 
 router = DefaultRouter()
-router.register(r'profesores', ProfesoresViewSet)
+# Registramos ProfesoresViewSet con el prefijo 'personal-con-cargos' para exponer el endpoint y su acción exportar-excel
+router.register(r'personal-con-cargos', ProfesoresViewSet, basename='personal-con-cargos')
 router.register(r'representantes', RepresentantesLegalesViewSet)
 router.register(r'alumno-representante', AlumnoRepresentanteViewSet)
 
