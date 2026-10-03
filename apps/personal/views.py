@@ -1,11 +1,12 @@
 from rest_framework import viewsets, permissions
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.http import HttpResponse
 import csv
 import openpyxl
 from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -18,6 +19,58 @@ class ProfesoresViewSet(viewsets.ModelViewSet):
     queryset = Profesores.objects.select_related('id_usuario').all()
     serializer_class = ProfesoresSerializer
     search_fields = ['cedula', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'especialidad']
+
+    @swagger_auto_schema(
+        method='GET',
+        operation_description='Exportar personal con cargos en formato Excel (.xlsx)',
+        responses={200: openapi.Response('Archivo Excel')}
+    )
+    @action(detail=False, methods=['get'], url_path='exportar-excel')
+    def exportar_excel(self, request):
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Personal con Cargos"
+
+        fuente_cabecera = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        relleno_azul = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+
+        encabezados = ['Cédula', 'Primer Nombre', 'Primer Apellido', 'Especialidad', 'Cargo', 'Teléfono', 'Correo']
+        ws.append(encabezados)
+
+        for col_num in range(1, len(encabezados) + 1):
+            celda = ws.cell(row=1, column=col_num)
+            celda.font = fuente_cabecera
+            celda.fill = relleno_azul
+
+        personal = self.get_queryset()
+
+        for p in personal:
+            cargo = getattr(p, 'cargo', 'No asignado')
+            telefono = getattr(p, 'telefono', '') or (getattr(p.id_usuario, 'telefono', 'No registrado') if p.id_usuario else 'No registrado')
+            correo = getattr(p, 'correo', '') or (getattr(p.id_usuario, 'email', 'No registrado') if p.id_usuario else 'No registrado')
+
+            ws.append([
+                p.cedula,
+                p.primer_nombre,
+                p.primer_apellido,
+                p.especialidad or 'No especificada',
+                cargo,
+                telefono,
+                correo
+            ])
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="personal_con_cargos.xlsx"'
+
+        wb.save(response)
+        return response
 
 @swagger_auto_schema(tags=['Representantes Legales'])
 class RepresentantesLegalesViewSet(viewsets.ModelViewSet):
