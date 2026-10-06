@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# SCRIPT DE PRUEBA DE ENDPOINTS - PLATAFORMA ESCOLAR BACKEND (V3 FIJA)
+# ============================================================================
+
+# Colores para la terminal
+VERDE='\033[0;32m'
+AZUL='\033[0;34m'
+ROJO='\033[0;31m'
+NC='\033[0m' # Sin Color
+
+URL_BASE="http://127.0.0.1:8000"
+
+echo -e "${AZUL}==================================================================${NC}"
+echo -e "${AZUL} INICIANDO PRUEBAS DE ENDPOINTS DE LA PLATAFORMA ESCOLAR ${NC}"
+echo -e "${AZUL}==================================================================${NC}\n"
+
+# 1. Verificar Disponibilidad de la API Básica
+echo -e "${AZUL}[TEST 1] Verificando catálogo base de Secciones...${NC}"
+STATUS_SECCIONES=$(curl -s -o /dev/null -w "%{http_code}" "$URL_BASE/api/core/secciones/")
+
+if [ "$STATUS_SECCIONES" -eq 200 ]; then
+    echo -e "${VERDE}✔ Endpoint /api/core/secciones/ operativo (HTTP 200).${NC}\n"
+else
+    echo -e "${ROJO}✘ Error en /api/core/secciones/. Código recibido: $STATUS_SECCIONES. Revisa las URLs de core.${NC}\n"
+fi
+
+# 2. Verificar Barra de Búsqueda Corregida en Profesores (Evitar FieldError)
+echo -e "${AZUL}[TEST 2] Probando filtro de búsqueda corregido en Profesores...${NC}"
+RESPUESTA_PROFESORES=$(curl -s -w "\n%{http_code}" "$URL_BASE/api/personal/profesores/?search=Juan")
+STATUS_PROFESORES=$(echo "$RESPUESTA_PROFESORES" | tail -n1)
+
+if [ "$STATUS_PROFESORES" -eq 200 ]; then
+    echo -e "${VERDE}✔ Endpoint /api/personal/profesores/ con filtros de búsqueda funciona correctamente (HTTP 200).${NC}\n"
+else
+    echo -e "${ROJO}✘ Error crítico al buscar profesores. Código: $STATUS_PROFESORES.${NC}\n"
+fi
+
+# 3. Verificar el Nuevo Módulo de Asistencias
+echo -e "${AZUL}[TEST 3] Evaluando el nuevo endpoint de Asistencias...${NC}"
+STATUS_ASISTENCIAS=$(curl -s -o /dev/null -w "%{http_code}" "$URL_BASE/api/academico/asistencias/")
+
+if [ "$STATUS_ASISTENCIAS" -eq 200 ] || [ "$STATUS_ASISTENCIAS" -eq 403 ]; then
+    echo -e "${VERDE}✔ Endpoint /api/academico/asistencias/ enrutado correctamente (HTTP $STATUS_ASISTENCIAS).${NC}\n"
+else
+    echo -e "${ROJO}✘ Error en enrutamiento de asistencias. Código recibido: $STATUS_ASISTENCIAS.${NC}\n"
+fi
+
+# 4. Verificar Acceso Libre a Exportaciones de Alumnos-Representantes
+echo -e "${AZUL}[TEST 4] Validando acceso público (AllowAny) a descargas CSV de Personal...${NC}"
+STATUS_EXPORT_CSV=$(curl -s -o /dev/null -w "%{http_code}" "$URL_BASE/api/personal/exportar-csv/")
+
+if [ "$STATUS_EXPORT_CSV" -eq 200 ]; then
+    echo -e "${VERDE}✔ Descarga pública de CSV de alumnos y representantes operativa (HTTP 200).${NC}\n"
+else
+    echo -e "${ROJO}✘ Error en descarga de exportación CSV. Código recibido: $STATUS_EXPORT_CSV.${NC}\n"
+fi
+
+echo -e "${AZUL}==================================================================${NC}"
+echo -e "${AZUL} PRUEBAS FINALIZADAS ${NC}"
+echo -e "${AZUL}==================================================================${NC}"
+

@@ -1,0 +1,151 @@
+reporte_contenido = """================================================================================
+REPORTE TÉCNICO DE AUDITORÍA Y AJUSTES DE MAPEO (DJANGO ORM vs. MARIADB/MYSQL)
+Destinatario: Agente de IA / Devin
+Proyecto: Plataforma Escolar Backend (Django REST Framework)
+Esquema DB Base: plataforma_escolar_v12_final_final.sql
+Estado de Sincronización: Base de Datos Externa (managed = False correcto)
+Este reporte detalla las discrepancias exactas entre las columnas y tipos de datos del
+script SQL y el código de Django. Incluye las correcciones de código necesarias para
+reemplazar de forma inmediata y asegurar que el servidor compile y opere sin errores
+de base de datos.
+================================================================================
+1. ALERTAS DE ARQUITECTURA Y ERRORES SINTÁCTICOS DETECTADOS
+================================================================================
+[ALERTA 01] Modelo Secciones Inconsistente con el SQL:
+• En Django se intenta acceder a un campo 'grado.nombre' en SeccionesSerializer.
+• En el Script SQL, la tabla secciones es un catálogo plano (id_seccion, nombre_seccion).
+No posee relación directa con grados. La asociación real ocurre en grupos_academicos.
+• SOLUCIÓN: Remover el campo 'grado_nombre' del serializador.
+[ALERTA 02] Error de Tipos y Validación en Calificaciones:
+• En Django se implementó un validador 'validate_nota' para una escala de 0 a 20.
+• En el Script SQL, la columna calificacion de la tabla calificaciones es un
+ENUM('A', 'B', 'C', 'D'). Si Django envía un entero, la base de datos abortará la consulta.
+• SOLUCIÓN: Cambiar el validador a 'validate_calificacion' evaluando las letras del ENUM.
+[ALERTA 03] Campos Fantasma en Vistas de Calificaciones:
+• CalificacionesViewSet tiene declarados 'materia_asignatura' y 'lapso_periodo' en
+filterset_fields y search_fields.
+• En el Script SQL, la tabla calificaciones carece por completo de estos campos
+y no existe una tabla de Materias en el esquema v12.
+• SOLUCIÓN: Limpiar filterset_fields y search_fields en las vistas.
+[ALERTA 04] Hilos Cruzados en Llaves Foráneas (FK) y Serializadores:
+• Cuando en el modelo se define un ForeignKey con el prefijo "id_" (ej. id_nivel,
+id_direccion_residencia), Django expone la propiedad relacional bajo ese mismo nombre.
+• El código original de los serializadores intenta acceder mediante 'nivel.nombre_nivel'
+o 'direccion', lo que genera excepciones de atributo.
+• SOLUCIÓN: Corregir las propiedades 'source' de acuerdo al mapeo explícito del modelo.
+================================================================================
+2. CÓDIGO CORREGIDO PARA REEMPLAZO INMEDIATO
+ARCHIVO: apps/core/serializers.py
+from rest_framework import serializers
+from .models import (
+Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
+NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
+)
+class DireccionesSerializer(serializers.ModelSerializer):
+class Meta:
+model = Direcciones
+fields = 'all'
+class ConfiguracionPlantelSerializer(serializers.ModelSerializer):
+id_director_actual_detalle = serializers.PrimaryKeyRelatedField(read_only=True)
+class Meta:
+model = ConfiguracionPlantel
+fields = 'all'
+class PeriodosAcademicosSerializer(serializers.ModelSerializer):
+class Meta:
+model = PeriodosAcademicos
+fields = 'all'
+class NivelesEducativosSerializer(serializers.ModelSerializer):
+class Meta:
+model = NivelesEducativos
+fields = 'all'
+class TurnosSerializer(serializers.ModelSerializer):
+class Meta:
+model = Turnos
+fields = 'all'
+class GradosAcademicosSerializer(serializers.ModelSerializer):
+nivel_nombre = serializers.ReadOnlyField(source='id_nivel.nombre_nivel')
+class Meta:
+model = GradosAcademicos
+fields = 'all'
+class SeccionesSerializer(serializers.ModelSerializer):
+class Meta:
+model = Secciones
+fields = 'all'
+class UsuariosSerializer(serializers.ModelSerializer):
+class Meta:
+model = Usuarios
+fields = 'all'
+extra_kwargs = {
+'clave_hash': {'write_only': True}
+}
+ARCHIVO: apps/academico/serializers.py
+from rest_framework import serializers
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones
+from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
+from apps.personal.serializers import ProfesoresSerializer
+class AlumnosSerializer(serializers.ModelSerializer):
+direccion_detalle = DireccionesSerializer(source='id_direccion_residencia', read_only=True)
+class Meta:
+model = Alumnos
+fields = 'all'
+class GruposAcademicosSerializer(serializers.ModelSerializer):
+periodo_detalle = PeriodosAcademicosSerializer(source='periodo', read_only=True)
+grado_detalle = GradosAcademicosSerializer(source='grado', read_only=True)
+seccion_detalle = SeccionesSerializer(source='seccion', read_only=True)
+turno_detalle = TurnosSerializer(source='turno', read_only=True)
+profesor_guia_detalle = ProfesoresSerializer(source='profesor_director', read_only=True)
+class Meta:
+model = GruposAcademicos
+fields = 'all'
+class InscripcionesSerializer(serializers.ModelSerializer):
+fecha_inscripcion = serializers.DateTimeField(format="%Y-%m-%d", input_formats=["%Y-%m-%d", "iso-8601"], allow_null=True, required=False)
+alumno_detalle = AlumnosSerializer(source='alumno', read_only=True)
+grupo_academico_detalle = GruposAcademicosSerializer(source='grupo', read_only=True)
+periodo_detalle = PeriodosAcademicosSerializer(source='grupo.id_periodo', read_only=True)
+class Meta:
+model = Inscripciones
+fields = 'all'
+class CalificacionesSerializer(serializers.ModelSerializer):
+alumno_nombre = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_nombre')
+alumno_apellido = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_apellido')
+profesor_nombre = serializers.ReadOnlyField(source='id_profesor.primer_nombre')
+class Meta:
+model = Calificaciones
+fields = 'all'
+def validate_calificacion(self, value):
+opciones_validas = ['A', 'B', 'C', 'D']
+if value not in opciones_validas:
+raise serializers.ValidationError(f"La calificación debe ser una de las siguientes opciones: {opciones_validas}")
+return value
+ARCHIVO: apps/academico/views.py (Fragmentos Corregidos)
+Reemplazar la acción 'alumnos_activos' dentro de GruposAcademicosViewSet:
+@action(detail=True, methods=['get'], url_path='alumnos-activos')
+def alumnos_activos(self, request, pk=None):
+grupo_academico = self.get_object()
+inscripciones = Inscripciones.objects.filter(
+grupo=grupo_academico,
+estado_inscripcion='Activa'
+).select_related('alumno')
+alumnos = [registro.alumno for registro in inscripciones]
+serializer = AlumnosSerializer(alumnos, many=True)
+return Response(serializer.data, status=status.HTTP_200_OK)
+Reemplazar el CalificacionesViewSet para remover filtros fantasma:
+@swagger_auto_schema(tags=['Calificaciones'])
+class CalificacionesViewSet(viewsets.ModelViewSet):
+queryset = Calificaciones.objects.select_related('inscripcion__alumno', 'id_profesor')
+serializer_class = CalificacionesSerializer
+permission_classes = [EsProfesorOAdmin]
+filterset_fields = ['inscripcion', 'id_profesor', 'calificacion']
+search_fields = ['inscripcion__alumno__primer_nombre', 'inscripcion__alumno__primer_apellido']
+================================================================================
+3. REQUERIMIENTOS ADICIONALES PARA EL AGENTE DEVOPS/DEVELOPER
+1. Crear el archivo apps/academico/permissions.py e implementar la clase
+EsProfesorOAdmin evaluando de forma explícita el string del campo rol del
+modelo Usuarios.
+2. Dado que clave_hash se maneja directo en la tabla usuarios (sin usar el
+User por defecto de Django), asegurar un backend de autenticación personalizado
+para no comprometer el flujo del login de cara al frontend.
+================================================================================
+FIN DEL REPORTE
+================================================================================
+"""

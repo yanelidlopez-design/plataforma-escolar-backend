@@ -1,0 +1,81 @@
+================================================================================
+REPORTE TÉCNICO DE ACTUALIZACIÓN Y HOJA DE RUTA FINAL (DJANGO ORM)
+================================================================================
+Destinatario: Agente de IA / Devin
+Proyecto: Plataforma Escolar Backend (Django REST Framework)
+Fecha de Revisión: 2 de octubre de 2026
+Estado General: 90% Completado (Fase de Pruebas Lógicas y Despliegue)
+
+Este documento detalla el estado actual del proyecto tras aplicar las correcciones
+de auditoría en serializers, vistas y el nuevo sistema de asistencias. Contiene
+las directivas exactas para que Devin finalice las pruebas funcionales, valide la
+seguridad y ponga en marcha el servidor sin errores.
+
+================================================================================
+1. VERIFICACIÓN DE CAMBIOS APLICADOS CON ÉXITO
+================================================================================
+- Corrección de Serializers: Mapeo explícito usando 'id_nivel', 'id_direccion_residencia'
+  y 'profesor_director' corregido de acuerdo al script de base de datos relacional.
+- Eliminación de Campos Fantasma: Se limpiaron las referencias a 'materia_asignatura'
+  y 'lapso_periodo' en Calificaciones, alineándose con el ENUM('A', 'B', 'C', 'D').
+- Módulo Asistencias: Implementado con restricción 'unique_together' por fecha, alumno
+  y grupo. Serializador incluye métodos display para legibilidad en frontend.
+- Permisos: Implementación del validador de roles personalizado 'EsProfesorOAdmin'
+  dentro de apps/academico/permissions.py.
+
+================================================================================
+2. COMPORTAMIENTOS CRÍTICOS POR AUDITAR (Tareas Inmediatas para Devin)
+================================================================================
+
+[REVISIÓN 01] Validación de Atributos en AsistenciasSerializer:
+Devin debe abrir 'apps/academico/serializers.py' y verificar el ReadOnlyField de
+'grupo_nombre'. El source está configurado como 'grupo.grado.nombre_grado'.
+Dado que el modelo 'GruposAcademicos' declara el campo como:
+   grado = models.ForeignKey('core.GradosAcademicos', ..., db_column='id_grado')
+Django genera la propiedad de relación automáticamente sobre 'grado'. Sin embargo, si
+el backend falla al serializar, Devin debe mutar el source a:
+   grupo.id_grado.nombre_grado
+Lo mismo aplica para 'seccion_nombre', verificando si requiere mutar de 'grupo.seccion...'
+a 'grupo.id_seccion.nombre_seccion'.
+
+[REVISIÓN 02] Coherencia del Campo de Búsqueda en ProfesoresViewSet:
+En 'apps/personal/views.py', ProfesoresViewSet define:
+   search_fields = ['cedula', 'nombres', 'apellidos', 'especialidad']
+Sin embargo, el modelo 'Profesores' en 'apps/personal/models.py' no posee campos
+llamados 'nombres' ni 'apellidos'. Utiliza:
+   ['primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido']
+Devin debe corregir inmediatamente 'search_fields' en ProfesoresViewSet y
+RepresentantesLegalesViewSet para evitar excepciones 'FieldError' al usar la barra de
+búsqueda de Swagger.
+
+[REVISIÓN 03] Seguridad y Encriptación en Creación de Usuarios:
+El UsuariosSerializer tiene 'clave_hash' configurado como write_only. Devin debe asegurar
+que al realizar un POST a /api/core/usuarios/, la clave no se guarde en texto plano.
+Debe implementar el método override de create/update en el serializer o asegurar que
+el backend intercepte el string para aplicarle un algoritmo de hashing compatible
+con el sistema de login.
+
+================================================================================
+3. PLAN DE EJECUCIÓN SECUENCIAL (Comandos de Terminal)
+================================================================================
+Devin debe abrir la terminal en el entorno Garuda Linux y ejecutar en orden estricto:
+
+Paso 1: Validación Sintáctica del Entorno
+   source venv/bin/activate
+   pip install -r requirements.txt
+
+Paso 2: Sincronización Estructural de la DB
+Dado que los modelos tienen 'managed = False', Django no modificará la DB, pero requiere
+registrar las estructuras en la tabla interna 'django_migrations'.
+   python manage.py makemigrations
+   python manage.py migrate
+
+Paso 3: Poblado y Encendido
+Devin debe ejecutar el script provisto de datos muestra para verificar consistencia
+de llaves foráneas y levantar el entorno local.
+   python poblar_datos_prueba.py
+   python manage.py runserver 0.0.0.0:8000
+
+================================================================================
+FIN DE LA DIRECTIVA TÉCNICA
+================================================================================

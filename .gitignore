@@ -1,0 +1,9 @@
+.aider*
+.env
+# Python
+venv/
+__pycache__/
+*.pyc
+# Django
+staticfiles/
+*.log

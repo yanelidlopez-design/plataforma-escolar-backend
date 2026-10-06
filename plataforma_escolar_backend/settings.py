@@ -11,6 +11,10 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-plataforma-esc
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
+# Token secreto para el webhook de Google Forms
+# Si no está definido, el webhook rechaza todas las peticiones con 403.
+WEBHOOK_SECRET_TOKEN = os.environ.get('WEBHOOK_SECRET_TOKEN', '')
+
 ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
@@ -23,6 +27,7 @@ INSTALLED_APPS = [
 
     # Third-party apps
     'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
 
     # Local apps
@@ -43,6 +48,12 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'plataforma_escolar_backend.urls'
+
+AUTH_USER_MODEL = 'core.Usuarios'
+
+AUTHENTICATION_BACKENDS = [
+    'apps.core.serializers.CustomBackend',
+]
 
 TEMPLATES = [
     {
@@ -94,6 +105,12 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ],
+}
+
+SIMPLE_JWT = {
+    'USER_AUTHENTICATION_RULE': lambda user: user.activo if hasattr(user, 'activo') else True,
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 # Configuración de CORS para permitir peticiones locales

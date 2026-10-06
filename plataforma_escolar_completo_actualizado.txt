@@ -1,0 +1,1328 @@
+# PLATAFORMA ESCOLAR BACKEND - DOCUMENTACIÓN COMPLETA PARA AGENTE IA
+# Proyecto Django REST Framework con Swagger UI y Sistema de Asistencias
+# Base de datos: MariaDB/MySQL
+# Fecha: 2 de octubre de 2026
+
+================================================================================
+1. INFORMACIÓN GENERAL DEL PROYECTO
+================================================================================
+
+Nombre del proyecto: Plataforma Escolar Backend
+Framework: Django 5.0.14 + Django REST Framework 3.17.2
+Documentación API: drf-yasg 1.21.15 (Swagger UI + ReDoc)
+Base de datos: MariaDB/MySQL (mysqlclient 2.3.0)
+Exportación de datos: CSV, Excel (openpyxl), PDF (reportlab)
+Zona horaria: America/Caracas
+Idioma: Español (es-es)
+
+Estructura del proyecto:
+- config/ -> Configuración principal (settings, urls, wsgi, asgi)
+- apps/ -> Aplicaciones modulares
+  - core/ -> Módulo core (direcciones, configuración, catálogos)
+  - personal/ -> Módulo personal (profesores, representantes, exportaciones)
+  - academico/ -> Módulo académico (alumnos, grupos, inscripciones, calificaciones, asistencias)
+- templates/ -> Templates personalizados (Swagger UI)
+- static/ -> Archivos estáticos
+- venv/ -> Entorno virtual Python
+
+================================================================================
+2. CONFIGURACIÓN DEL PROYECTO
+================================================================================
+
+ARCHIVO: requirements.txt
+--------------------------
+asgiref==3.12.1
+charset-normalizer==3.5.2
+Django==5.0.14
+django-cors-headers==4.9.0
+django-environ==0.14.0
+djangorestframework==3.17.2
+drf-yasg==1.21.15
+et_xmlfile==2.0.0
+inflection==0.5.1
+mysqlclient==2.3.0
+openpyxl==3.1.5
+packaging==26.3
+pillow==12.3.0
+python-dotenv==1.2.3
+pytz==2026.4
+PyYAML==6.0.3
+reportlab==5.0.1
+sqlparse==0.6.0
+uritemplate==4.2.0
+
+ARCHIVO: manage.py
+------------------
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+if __name__ == '__main__':
+    main()
+
+ARCHIVO: config/settings.py
+----------------------------
+import os
+from pathlib import Path
+import drf_yasg 
+import sys
+import environ
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
+
+env = environ.Env(
+    DEBUG=(bool, False)
+)
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+SECRET_KEY = env('SECRET_KEY')
+DEBUG = env('DEBUG')
+
+ALLOWED_HOSTS = ['*']
+
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+
+    # Third-party apps
+    'drf_yasg',
+    'rest_framework',
+    'corsheaders',
+
+    # Local apps
+    'apps.core.apps.CoreConfig',
+    'apps.personal.apps.PersonalConfig',
+    'apps.academico.apps.AcademicoConfig',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+ROOT_URLCONF = 'config.urls'
+
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates'],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': env('DB_NAME'),
+        'USER': env('DB_USER'),
+        'PASSWORD': env('DB_PASSWORD'),
+        'HOST': env('DB_HOST'),
+        'PORT': env('DB_PORT'),
+        'OPTIONS': {
+            'charset': 'utf8mb4',
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
+    }
+}
+
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
+    ],
+}
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+LANGUAGE_CODE = 'es-es'
+
+TIME_ZONE = 'America/Caracas'
+
+USE_I18N = True
+
+USE_TZ = True
+
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+SWAGGER_SETTINGS = {
+    'USE_SESSION_AUTH': True,
+    'VALIDATOR_URL': None,
+}
+
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+ARCHIVO: config/urls.py
+-----------------------
+from django.contrib import admin
+from django.urls import path, include, re_path
+from rest_framework import permissions
+from drf_yasg.views import get_schema_view
+from drf_yasg import openapi
+
+schema_view = get_schema_view(
+   openapi.Info(
+      title="API de Plataforma Escolar",
+      default_version='v1',
+      description="Documentación interactiva de los módulos de la institución educativa",
+      contact=openapi.Contact(email="tu_correo@ejemplo.com"),
+      license=openapi.License(name="BSD License"),
+   ),
+   public=True,
+   permission_classes=(permissions.AllowAny,),
+)
+
+urlpatterns = [
+    re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
+    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+
+    path('admin/', admin.site.urls),
+    path('api/core/', include('apps.core.urls')),
+    path('api/personal/', include('apps.personal.urls')),
+    path('api/academico/', include('apps.academico.urls')),
+]
+
+from django.conf import settings
+from django.conf.urls.static import static
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+ARCHIVO: config/asgi.py
+------------------------
+import os
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+application = get_asgi_application()
+
+ARCHIVO: config/wsgi.py
+------------------------
+import os
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+application = get_wsgi_application()
+
+ARCHIVO: .env (Ejemplo)
+-------------------------
+DEBUG=True
+SECRET_KEY=django-insecure-#r8z_@kq^2h4m6n8p0q2r4s6t8u0v2w4x6y8z0
+DB_NAME=plataforma_escolar
+DB_USER=admin_plataforma
+DB_PASSWORD=tu_contraseña
+DB_HOST=127.0.0.1
+DB_PORT=3306
+
+================================================================================
+3. MÓDULO CORE (Direcciones, Configuración, Catálogos)
+================================================================================
+
+ARCHIVO: apps/core/apps.py
+--------------------------
+from django.apps import AppConfig
+
+class CoreConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.core'
+    verbose_name = 'Módulo Core'
+
+ARCHIVO: apps/core/models.py
+-----------------------------
+from django.db import models
+
+class Direcciones(models.Model):
+    id_direccion = models.AutoField(primary_key=True, db_column='id_direccion')
+    calle = models.CharField(max_length=255)
+    ciudad = models.CharField(max_length=100)
+    estado = models.CharField(max_length=100)
+    referencia = models.TextField(blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'direcciones'
+        verbose_name = 'Dirección'
+        verbose_name_plural = 'Direcciones'
+
+    def __str__(self):
+        return f"{self.estado}, {self.ciudad} - {self.calle}"
+
+class ConfiguracionPlantel(models.Model):
+    id_config = models.AutoField(primary_key=True, db_column='id_config')
+    nombre_plantel = models.CharField(max_length=200)
+    codigo_estadistico = models.CharField(max_length=50, blank=True, null=True)
+    codigo_plantel = models.CharField(max_length=50, blank=True, null=True)
+    id_director_actual = models.IntegerField(blank=True, null=True)
+    id_subdirector_actual = models.IntegerField(blank=True, null=True)
+    codigo_dea = models.CharField(max_length=50, blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'configuracion_plantel'
+        verbose_name = 'Configuración del Plantel'
+        verbose_name_plural = 'Configuración del Plantel'
+
+    def __str__(self):
+        return self.nombre_plantel
+
+class PeriodosAcademicos(models.Model):
+    id_periodo = models.AutoField(primary_key=True, db_column='id_periodo')
+    codigo_periodo = models.CharField(max_length=50, unique=True, db_column='codigo_periodo')
+    nombre_periodo = models.CharField(max_length=100, db_column='nombre_periodo')
+    fecha_inicio = models.DateField(db_column='fecha_inicio')
+    fecha_fin = models.DateField(db_column='fecha_fin')
+    activo = models.BooleanField(default=True, db_column='activo')
+
+    class Meta:
+        managed = False
+        db_table = 'periodos_academicos'
+
+class NivelesEducativos(models.Model):
+    id_nivel = models.AutoField(primary_key=True, db_column='id_nivel')
+    nombre_nivel = models.CharField(max_length=100, db_column='nombre_nivel')
+
+    class Meta:
+        managed = False
+        db_table = 'niveles_educativos'
+        verbose_name = 'Nivel Educativo'
+        verbose_name_plural = 'Niveles Educativos'
+
+    def __str__(self):
+        return self.nombre_nivel
+
+class Turnos(models.Model):
+    id_turno = models.AutoField(primary_key=True, db_column='id_turno')
+    nombre_turno = models.CharField(max_length=50, db_column='nombre_turno')
+
+    class Meta:
+        managed = False
+        db_table = 'turnos'
+        verbose_name = 'Turno'
+        verbose_name_plural = 'Turnos'
+
+    def __str__(self):
+        return self.nombre_turno
+
+class GradosAcademicos(models.Model):
+    id_grado = models.AutoField(primary_key=True, db_column='id_grado')
+    id_nivel = models.ForeignKey(
+        NivelesEducativos,
+        on_delete=models.PROTECT,
+        db_column='id_nivel'
+    )
+    nombre_grado = models.CharField(max_length=100, db_column='nombre_grado')
+    orden = models.SmallIntegerField(db_column='orden')
+
+    class Meta:
+        managed = False
+        db_table = 'grados_academicos'
+        verbose_name = 'Grado Académico'
+        verbose_name_plural = 'Grados Académicos'
+
+    def __str__(self):
+        return self.nombre_grado
+
+class Secciones(models.Model):
+    id_seccion = models.AutoField(primary_key=True, db_column='id_seccion')
+    nombre_seccion = models.CharField(max_length=50, db_column='nombre_seccion')
+
+    class Meta:
+        managed = False
+        db_table = 'secciones'
+        verbose_name = 'Sección'
+        verbose_name_plural = 'Secciones'
+
+    def __str__(self):
+        return self.nombre_seccion
+
+class Usuarios(models.Model):
+    ROL_CHOICES = [
+        ('admin', 'Administrador'),
+        ('profesor', 'Profesor'),
+        ('directivo', 'Directivo'),
+        ('secretaria', 'Secretaria'),
+        ('alumno', 'Alumno'),
+    ]
+
+    id_usuario = models.AutoField(primary_key=True, db_column='id_usuario')
+    nombre_usuario = models.CharField(max_length=150, unique=True, db_column='nombre_usuario')
+    clave_hash = models.CharField(max_length=255, db_column='clave_hash')
+    email = models.EmailField(unique=True, db_column='email')
+    rol = models.CharField(max_length=20, choices=ROL_CHOICES, default='profesor', db_column='rol')
+    activo = models.BooleanField(default=True, db_column='activo')
+    fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
+
+    class Meta:
+        managed = False
+        db_table = 'usuarios'
+        verbose_name = 'Usuario'
+        verbose_name_plural = 'Usuarios'
+
+    def __str__(self):
+        return self.nombre_usuario
+
+ARCHIVO: apps/core/serializers.py
+---------------------------------
+from rest_framework import serializers
+from .models import (
+    Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
+    NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
+)
+
+class DireccionesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Direcciones
+        fields = '__all__'
+
+class ConfiguracionPlantelSerializer(serializers.ModelSerializer):
+    id_director_actual_detalle = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = ConfiguracionPlantel
+        fields = '__all__'
+
+class PeriodosAcademicosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PeriodosAcademicos
+        fields = '__all__'
+
+class NivelesEducativosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NivelesEducativos
+        fields = '__all__'
+
+class TurnosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Turnos
+        fields = '__all__'
+
+class GradosAcademicosSerializer(serializers.ModelSerializer):
+    nivel_nombre = serializers.ReadOnlyField(source='id_nivel.nombre_nivel')
+
+    class Meta:
+        model = GradosAcademicos
+        fields = '__all__'
+
+class SeccionesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Secciones
+        fields = '__all__'
+
+class UsuariosSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Usuarios
+        fields = '__all__'
+        extra_kwargs = {
+            'clave_hash': {'write_only': True}
+        }
+
+ARCHIVO: apps/core/views.py
+---------------------------
+from rest_framework import viewsets, permissions
+from drf_yasg.utils import swagger_auto_schema
+from .models import (
+    Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
+    NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
+)
+from .serializers import (
+    DireccionesSerializer, ConfiguracionPlantelSerializer, PeriodosAcademicosSerializer,
+    NivelesEducativosSerializer, TurnosSerializer, GradosAcademicosSerializer,
+    SeccionesSerializer, UsuariosSerializer
+)
+
+@swagger_auto_schema(tags=['Direcciones'])
+class DireccionesViewSet(viewsets.ModelViewSet):
+    queryset = Direcciones.objects.all()
+    serializer_class = DireccionesSerializer
+
+@swagger_auto_schema(tags=['Configuración Plantel'])
+class ConfiguracionPlantelViewSet(viewsets.ModelViewSet):
+    queryset = ConfiguracionPlantel.objects.all()
+    serializer_class = ConfiguracionPlantelSerializer
+
+@swagger_auto_schema(tags=['Períodos Académicos'])
+class PeriodosAcademicosViewSet(viewsets.ModelViewSet):
+    queryset = PeriodosAcademicos.objects.all()
+    serializer_class = PeriodosAcademicosSerializer
+
+@swagger_auto_schema(tags=['Niveles Educativos'])
+class NivelesEducativosViewSet(viewsets.ModelViewSet):
+    queryset = NivelesEducativos.objects.all()
+    serializer_class = NivelesEducativosSerializer
+
+@swagger_auto_schema(tags=['Turnos'])
+class TurnosViewSet(viewsets.ModelViewSet):
+    queryset = Turnos.objects.all()
+    serializer_class = TurnosSerializer
+
+@swagger_auto_schema(tags=['Grados Académicos'])
+class GradosAcademicosViewSet(viewsets.ModelViewSet):
+    queryset = GradosAcademicos.objects.select_related('id_nivel').all()
+    serializer_class = GradosAcademicosSerializer
+
+@swagger_auto_schema(tags=['Secciones'])
+class SeccionesViewSet(viewsets.ModelViewSet):
+    queryset = Secciones.objects.all()
+    serializer_class = SeccionesSerializer
+
+@swagger_auto_schema(tags=['Usuarios'])
+class UsuariosViewSet(viewsets.ModelViewSet):
+    queryset = Usuarios.objects.all()
+    serializer_class = UsuariosSerializer
+
+ARCHIVO: apps/core/urls.py
+--------------------------
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import (
+    DireccionesViewSet, ConfiguracionPlantelViewSet, PeriodosAcademicosViewSet,
+    NivelesEducativosViewSet, TurnosViewSet, GradosAcademicosViewSet,
+    SeccionesViewSet, UsuariosViewSet
+)
+
+router = DefaultRouter()
+router.register(r'direcciones', DireccionesViewSet)
+router.register(r'plantel', ConfiguracionPlantelViewSet)
+router.register(r'periodos', PeriodosAcademicosViewSet)
+router.register(r'niveles', NivelesEducativosViewSet)
+router.register(r'turnos', TurnosViewSet)
+router.register(r'grados', GradosAcademicosViewSet)
+router.register(r'secciones', SeccionesViewSet)
+router.register(r'usuarios', UsuariosViewSet)
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+
+================================================================================
+4. MÓDULO PERSONAL (Profesores, Representantes, Exportaciones)
+================================================================================
+
+ARCHIVO: apps/personal/apps.py
+------------------------------
+from django.apps import AppConfig
+
+class PersonalConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.personal'
+    verbose_name = 'Módulo Personal y Representantes'
+
+ARCHIVO: apps/personal/models.py
+---------------------------------
+from django.db import models
+
+class Profesores(models.Model):
+    id_profesor = models.AutoField(primary_key=True, db_column='id_profesor')
+    id_usuario = models.OneToOneField(
+        'core.Usuarios',
+        on_delete=models.CASCADE,
+        db_column='id_usuario',
+        blank=True,
+        null=True
+    )
+    primer_nombre = models.CharField(max_length=100, db_column='primer_nombre')
+    segundo_nombre = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_nombre')
+    primer_apellido = models.CharField(max_length=100, db_column='primer_apellido')
+    segundo_apellido = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_apellido')
+    cedula = models.CharField(max_length=20, unique=True, db_column='cedula')
+    especialidad = models.CharField(max_length=150, blank=True, null=True, db_column='especialidad')
+
+    class Meta:
+        managed = False
+        db_table = 'profesores'
+        verbose_name = 'Profesor'
+        verbose_name_plural = 'Profesores'
+
+    def __str__(self):
+        return f"Prof. {self.primer_nombre} {self.primer_apellido} - C.I. {self.cedula}"
+
+class RepresentantesLegales(models.Model):
+    id_representante = models.AutoField(primary_key=True, db_column='id_representante')
+    id_direccion_residencia = models.ForeignKey(
+        'core.Direcciones',
+        on_delete=models.SET_NULL,
+        db_column='id_direccion_residencia',
+        blank=True,
+        null=True
+    )
+    primer_nombre = models.CharField(max_length=100, db_column='primer_nombre')
+    segundo_nombre = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_nombre')
+    primer_apellido = models.CharField(max_length=100, db_column='primer_apellido')
+    segundo_apellido = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_apellido')
+    cedula = models.CharField(max_length=20, unique=True, db_column='cedula')
+    carnet_patria = models.CharField(max_length=50, blank=True, null=True, db_column='carnet_patria')
+    telefono_principal = models.CharField(max_length=20, db_column='telefono_principal')
+    telefono_secundario = models.CharField(max_length=20, blank=True, null=True, db_column='telefono_secundario')
+    email = models.EmailField(max_length=150, blank=True, null=True, db_column='email')
+    ocupacion = models.CharField(max_length=150, blank=True, null=True, db_column='ocupacion')
+
+    class Meta:
+        managed = False
+        db_table = 'representantes_legales'
+        verbose_name = 'Representante Legal'
+        verbose_name_plural = 'Representantes Legales'
+
+    def __str__(self):
+        return f"{self.primer_nombre} {self.primer_apellido} - C.I. {self.cedula}"
+
+class AlumnoRepresentante(models.Model):
+    alumno= models.ForeignKey(
+        'academico.Alumnos',
+        on_delete=models.CASCADE,
+        db_column='id_alumno',
+        primary_key=True
+    )
+    representante = models.ForeignKey(
+        RepresentantesLegales,
+        on_delete=models.CASCADE,
+        db_column='id_representante'
+    )
+    parentesco = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        db_column='parentesco'
+    )
+    es_principal = models.BooleanField(
+        default=True,
+        db_column='es_principal'
+    )
+
+    class Meta:
+        managed = False
+        db_table = 'alumno_representante'
+        unique_together = (('alumno', 'representante'),)
+        verbose_name = 'Asociación Alumno - Representante'
+        verbose_name_plural = 'Asociaciones Alumnos - Representantes'
+
+    def __str__(self):
+        return f"Alumno ID {self.alumno_id} <-> Representante ID {self.representante_id}"
+
+ARCHIVO: apps/personal/serializers.py
+--------------------------------------
+from rest_framework import serializers
+from .models import Profesores, RepresentantesLegales, AlumnoRepresentante
+from apps.core.serializers import DireccionesSerializer, UsuariosSerializer
+
+class ProfesoresSerializer(serializers.ModelSerializer):
+    usuario_detalle = UsuariosSerializer(source='usuario', read_only=True)
+
+    class Meta:
+        model = Profesores
+        fields = '__all__'
+
+class RepresentantesLegalesSerializer(serializers.ModelSerializer):
+    direccion_detalle = DireccionesSerializer(source='direccion', read_only=True)
+
+    class Meta:
+        model = RepresentantesLegales
+        fields = '__all__'
+
+class AlumnoRepresentanteSerializer(serializers.ModelSerializer):
+    representante_detalle = RepresentantesLegalesSerializer(source='representante', read_only=True)
+
+    class Meta:
+        model = AlumnoRepresentante
+        fields = '__all__'
+
+ARCHIVO: apps/personal/views.py
+-------------------------------
+from rest_framework import viewsets, permissions
+from rest_framework.decorators import api_view, permission_classes
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from django.http import HttpResponse
+import csv
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from .models import Profesores, RepresentantesLegales, AlumnoRepresentante
+from .serializers import ProfesoresSerializer, RepresentantesLegalesSerializer, AlumnoRepresentanteSerializer
+
+@swagger_auto_schema(tags=['Profesores'])
+class ProfesoresViewSet(viewsets.ModelViewSet):
+    queryset = Profesores.objects.select_related('id_usuario').all()
+    serializer_class = ProfesoresSerializer
+    search_fields = ['cedula', 'nombres', 'apellidos', 'especialidad']
+
+@swagger_auto_schema(tags=['Representantes Legales'])
+class RepresentantesLegalesViewSet(viewsets.ModelViewSet):
+    queryset = RepresentantesLegales.objects.select_related('id_direccion_residencia').all()
+    serializer_class = RepresentantesLegalesSerializer
+    search_fields = ['cedula', 'nombres', 'apellidos']
+
+@swagger_auto_schema(tags=['Alumno-Representante'])
+class AlumnoRepresentanteViewSet(viewsets.ModelViewSet):
+    queryset = AlumnoRepresentante.objects.all()
+    serializer_class = AlumnoRepresentanteSerializer
+    filterset_fields = ['id_alumno', 'id_representante', 'es_principal']
+
+@swagger_auto_schema(
+    method='GET',
+    operation_description='Exportar alumnos y representantes en formato CSV',
+    tags=['Exportaciones'],
+    responses={200: openapi.Response('Archivo CSV')}
+)
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def exportar_alumnos_representantes_csv(request):
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = 'attachment; filename="alumnos_y_representantes.csv"'
+
+    writer = csv.writer(response, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(['Alumno', 'Representante', 'Teléfono', 'Parentesco', 'Es Principal'])
+
+    relaciones = AlumnoRepresentante.objects.select_related('alumno', 'representante')
+
+    for relacion in relaciones:
+       writer.writerow([
+           f"{relacion.alumno.primer_nombre} {relacion.alumno.primer_apellido}",
+           f"{relacion.representante.primer_nombre} {relacion.representante.primer_apellido}",
+           relacion.representante.telefono_principal or 'No registrado',
+           relacion.parentesco or 'No especificado',
+           'Sí' if relacion.es_principal else 'No'
+       ])
+
+    return response
+
+@swagger_auto_schema(
+    method='GET',
+    operation_description='Exportar alumnos y representantes en formato Excel',
+    tags=['Exportaciones'],
+    responses={200: openapi.Response('Archivo Excel')}
+)
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def exportar_alumnos_representantes_excel(request):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Alumnos y Representantes"
+
+    fuente_titulo = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    relleno_azul = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+
+    encabezados = ['Alumno', 'Representante', 'Teléfono', 'Parentesco', 'Es Principal']
+    ws.append(encabezados)
+
+    for col_num in range(1, 6):
+        celda = ws.cell(row=1, column=col_num)
+        celda.font = fuente_titulo
+        celda.fill = relleno_azul
+
+    relaciones = AlumnoRepresentante.objects.select_related('alumno', 'representante')
+
+    for relacion in relaciones:
+        ws.append([
+            f"{relacion.alumno.primer_nombre} {relacion.alumno.primer_apellido}",
+            f"{relacion.representante.primer_nombre} {relacion.representante.primer_apellido}",
+            relacion.representante.telefono_principal or 'No registrado',
+            relacion.parentesco or 'No especificado',
+            "Sí" if relacion.es_principal else "No"
+        ])
+
+    response = HttpResponse(
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    response['Content-Disposition'] = 'attachment; filename="reporte_institucional.xlsx"'
+
+    wb.save(response)
+    return response
+
+@swagger_auto_schema(
+    method='GET',
+    operation_description='Exportar alumnos y representantes en formato PDF',
+    tags=['Exportaciones'],
+    responses={200: openapi.Response('Archivo PDF')}
+)
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def exportar_alumnos_representantes_pdf(request):
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="lista_alumnos.pdf"'
+
+    doc = SimpleDocTemplate(response, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
+
+    styles = getSampleStyleSheet()
+    estilo_titulo = ParagraphStyle(
+        'TituloReporte',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor('#1F4E78'),
+        alignment=1
+    )
+
+    story.append(Paragraph("PLATAFORMA ESCOLAR - CONTROL DE INSCRIPCIONES", estilo_titulo))
+    story.append(Spacer(1, 20))
+
+    datos_tabla = [['Alumno', 'Representante', 'Teléfono', 'Parentesco', 'Es Principal']]
+
+    relaciones = AlumnoRepresentante.objects.select_related('alumno', 'representante')
+    for relacion in relaciones:
+        datos_tabla.append([
+            f"{relacion.alumno.primer_nombre} {relacion.alumno.primer_apellido}",
+            f"{relacion.representante.primer_nombre} {relacion.representante.primer_apellido}",
+            relacion.representante.telefono_principal or 'No registrado',
+            relacion.parentesco or 'No especificado',
+            "Principal" if relacion.es_principal else "Secundario"
+        ])
+
+    tabla_pdf = Table(datos_tabla, colWidths=[150, 150, 120, 100, 100])
+    tabla_pdf.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E78')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F2F4F7')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')])
+    ]))
+
+    story.append(tabla_pdf)
+
+    doc.build(story)
+    return response
+
+ARCHIVO: apps/personal/urls.py
+------------------------------
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import ProfesoresViewSet, RepresentantesLegalesViewSet, AlumnoRepresentanteViewSet, exportar_alumnos_representantes_csv, exportar_alumnos_representantes_excel, exportar_alumnos_representantes_pdf
+
+router = DefaultRouter()
+router.register(r'profesores', ProfesoresViewSet)
+router.register(r'representantes', RepresentantesLegalesViewSet)
+router.register(r'alumno-representante', AlumnoRepresentanteViewSet)
+
+urlpatterns = [
+    path('exportar-csv/', exportar_alumnos_representantes_csv, name='exportar_alumnos_representantes_csv'),
+    path('exportar-excel/', exportar_alumnos_representantes_excel, name='exportar_excel'),
+    path('exportar-pdf/', exportar_alumnos_representantes_pdf, name='exportar_pdf'),
+    path('', include(router.urls)),  
+]
+
+================================================================================
+5. MÓDULO ACADÉMICO (Alumnos, Grupos, Inscripciones, Calificaciones, Asistencias)
+================================================================================
+
+ARCHIVO: apps/academico/apps.py
+--------------------------------
+from django.apps import AppConfig
+
+class AcademicoConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'apps.academico'
+    verbose_name = 'Módulo Académico'
+
+ARCHIVO: apps/academico/permissions.py
+--------------------------------------
+from rest_framework import permissions
+
+class EsProfesorOAdmin(permissions.BasePermission):
+    """
+    Permiso personalizado que solo permite acceso a usuarios con rol 'profesor' o 'admin'.
+    """
+
+    def has_permission(self, request, view):
+        if request.user and hasattr(request.user, 'rol'):
+            return request.user.rol in ['profesor', 'admin']
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        if request.user and hasattr(request.user, 'rol'):
+            return request.user.rol in ['profesor', 'admin']
+        return False
+
+ARCHIVO: apps/academico/models.py
+----------------------------------
+from django.db import models
+
+class Alumnos(models.Model):
+    id_alumno = models.AutoField(primary_key=True, db_column='id_alumno')
+    id_usuario = models.ForeignKey(
+        'core.Usuarios',
+        on_delete=models.SET_NULL,
+        db_column='id_usuario',
+        blank=True,
+        null=True
+    )
+    id_direccion_residencia = models.ForeignKey(
+        'core.Direcciones',
+        on_delete=models.SET_NULL,
+        db_column='id_direccion_residencia',
+        blank=True,
+        null=True
+    )
+    primer_nombre = models.CharField(max_length=100, db_column='primer_nombre')
+    segundo_nombre = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_nombre')
+    primer_apellido = models.CharField(max_length=100, db_column='primer_apellido')
+    segundo_apellido = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_apellido')
+    tipo_documento_identidad = models.CharField(max_length=10, blank=True, null=True, db_column='tipo_documento_identidad')
+    numero_documento_identidad = models.CharField(max_length=20, unique=True, db_column='numero_documento_identidad')
+    cedula_escolar = models.CharField(max_length=20, unique=True, db_column='cedula_escolar')
+    fecha_nacimiento = models.DateField(db_column='fecha_nacimiento')
+    genero = models.CharField(max_length=50, blank=True, null=True, db_column='genero')
+    lugar_nacimiento = models.CharField(max_length=150, blank=True, null=True, db_column='lugar_nacimiento')
+    nacionalidad = models.CharField(max_length=50, blank=True, null=True, db_column='nacionalidad')
+    grupo_sanguineo = models.CharField(max_length=5, blank=True, null=True, db_column='grupo_sanguineo')
+    peso_kg = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, db_column='peso_kg')
+    talla_cm = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, db_column='talla_cm')
+    fecha_inscripcion_inicial = models.DateField(blank=True, null=True, db_column='fecha_inscripcion_inicial')
+    estatus_general = models.CharField(max_length=50, blank=True, null=True, db_column='estatus_general')
+
+    class Meta:
+        managed = False
+        db_table = 'alumnos'
+        verbose_name = 'Alumno'
+        verbose_name_plural = 'Alumnos'
+
+    def __str__(self):
+        return f"{self.primer_nombre} {self.primer_apellido} - C.E.: {self.cedula_escolar}"
+
+class GruposAcademicos(models.Model):
+    id_grupo = models.AutoField(primary_key=True, db_column='id_grupo')
+    periodo = models.ForeignKey('core.PeriodosAcademicos', on_delete=models.PROTECT, db_column='id_periodo')
+    nivel = models.ForeignKey('core.NivelesEducativos', on_delete=models.PROTECT, db_column='id_nivel', blank=True, null=True)
+    grado = models.ForeignKey('core.GradosAcademicos', on_delete=models.PROTECT, db_column='id_grado')
+    seccion = models.ForeignKey('core.Secciones', on_delete=models.PROTECT, db_column='id_seccion')
+    turno = models.ForeignKey('core.Turnos', on_delete=models.PROTECT, db_column='id_turno')
+    profesor_director = models.ForeignKey('personal.Profesores', on_delete=models.SET_NULL, db_column='id_profesor_principal', blank=True, null=True)
+    cupo_maximo = models.IntegerField(default=30, db_column='cupo_maximo')
+
+    class Meta:
+        managed = False
+        db_table = 'grupos_academicos'
+        verbose_name = 'Grupo Académico'
+        verbose_name_plural = 'Grupos Académicos'
+
+    def __str__(self):
+        return f"{self.grado.nombre_grado} '{self.seccion.nombre_seccion}' - {self.periodo.nombre_periodo}"
+
+class Inscripciones(models.Model):
+    ESTADO_CHOICES = [
+        ('Activa', 'Activa'),
+        ('Retirado', 'Retirado'),
+        ('Graduado', 'Graduado'),
+    ]
+
+    id_inscripcion = models.AutoField(primary_key=True, db_column='id_inscripcion')
+    alumno = models.ForeignKey('Alumnos', on_delete=models.PROTECT, db_column='id_alumno')
+    grupo = models.ForeignKey(GruposAcademicos, on_delete=models.PROTECT, db_column='id_grupo')
+    fecha_inscripcion = models.DateTimeField(blank=True, null=True, db_column='fecha_inscripcion')
+    estado_inscripcion = models.CharField(max_length=50, choices=ESTADO_CHOICES, default='Activa', db_column='estado_inscripcion')
+    monto_pago = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, db_column='monto_pago')
+    referencia_bancaria = models.CharField(max_length=100, blank=True, null=True, db_column='referencia_bancaria')
+
+    class Meta:
+        managed = False
+        db_table = 'inscripciones'
+        verbose_name = 'Inscripción'
+        verbose_name_plural = 'Inscripciones'
+
+    def __str__(self):
+        return f"Inscripción #{self.id_inscripcion} - {self.alumno.primer_nombre} {self.alumno.primer_apellido}"
+
+class Calificaciones(models.Model):
+    id_calificacion = models.AutoField(primary_key=True, db_column='id_calificacion')
+    inscripcion = models.ForeignKey(Inscripciones, on_delete=models.CASCADE, db_column='id_inscripcion')
+    profesor = models.ForeignKey('personal.Profesores', on_delete=models.SET_NULL, db_column='id_profesor', blank=True, null=True)
+    calificacion = models.CharField(max_length=50, blank=True, null=True, db_column='calificacion')
+    fecha_registro = models.DateTimeField(blank=True, null=True, db_column='fecha_registro')
+
+    class Meta:
+        managed = False
+        db_table = 'calificaciones'
+        verbose_name = 'Calificación'
+        verbose_name_plural = 'Calificaciones'
+
+    def __str__(self):
+        return f"Calificación: {self.calificacion} - Alumno: {self.inscripcion.alumno.primer_nombre} {self.inscripcion.alumno.primer_apellido}"
+
+class Asistencias(models.Model):
+    ESTADO_CHOICES = [
+        ('P', 'Presente'),
+        ('A', 'Ausente'),
+        ('T', 'Tarde'),
+        ('J', 'Justificado'),
+    ]
+
+    id_asistencia = models.AutoField(primary_key=True, db_column='id_asistencia')
+    fecha = models.DateField(db_column='fecha')
+    alumno = models.ForeignKey(Alumnos, on_delete=models.CASCADE, db_column='id_alumno')
+    grupo = models.ForeignKey(GruposAcademicos, on_delete=models.CASCADE, db_column='id_grupo')
+    estado = models.CharField(max_length=1, choices=ESTADO_CHOICES, db_column='estado')
+    observaciones = models.TextField(blank=True, null=True, db_column='observaciones')
+    profesor_registro = models.ForeignKey('personal.Profesores', on_delete=models.SET_NULL, db_column='id_profesor_registro', blank=True, null=True)
+    fecha_registro = models.DateTimeField(auto_now_add=True, db_column='fecha_registro')
+
+    class Meta:
+        managed = False
+        db_table = 'asistencias'
+        verbose_name = 'Asistencia'
+        verbose_name_plural = 'Asistencias'
+        unique_together = [('fecha', 'alumno', 'grupo')]
+
+    def __str__(self):
+        return f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} - {self.fecha} - {self.get_estado_display()}"
+
+ARCHIVO: apps/academico/serializers.py
+--------------------------------------
+from rest_framework import serializers
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias
+from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
+from apps.personal.serializers import ProfesoresSerializer
+
+class AlumnosSerializer(serializers.ModelSerializer):
+    direccion_detalle = DireccionesSerializer(source='id_direccion_residencia', read_only=True)
+
+    class Meta:
+        model = Alumnos
+        fields = '__all__'
+
+class GruposAcademicosSerializer(serializers.ModelSerializer):
+    periodo_detalle = PeriodosAcademicosSerializer(source='periodo', read_only=True)
+    grado_detalle = GradosAcademicosSerializer(source='grado', read_only=True)
+    seccion_detalle = SeccionesSerializer(source='seccion', read_only=True)
+    turno_detalle = TurnosSerializer(source='turno', read_only=True)
+    profesor_guia_detalle = ProfesoresSerializer(source='profesor_director', read_only=True)
+
+    class Meta:
+        model = GruposAcademicos
+        fields = '__all__'
+
+class InscripcionesSerializer(serializers.ModelSerializer):
+    fecha_inscripcion = serializers.DateTimeField(format="%Y-%m-%d", input_formats=["%Y-%m-%d", "iso-8601"], allow_null=True, required=False)
+    alumno_detalle = AlumnosSerializer(source='alumno', read_only=True)
+    grupo_academico_detalle = GruposAcademicosSerializer(source='grupo', read_only=True)
+    periodo_detalle = PeriodosAcademicosSerializer(source='grupo.id_periodo', read_only=True)
+
+    class Meta:
+        model = Inscripciones
+        fields = '__all__'
+
+class CalificacionesSerializer(serializers.ModelSerializer):
+    alumno_nombre = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_nombre')
+    alumno_apellido = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_apellido')
+    profesor_nombre = serializers.ReadOnlyField(source='id_profesor.primer_nombre')
+
+    class Meta:
+        model = Calificaciones
+        fields = '__all__'
+
+    def validate_calificacion(self, value):
+        opciones_validas = ['A', 'B', 'C', 'D']
+        if value not in opciones_validas:
+            raise serializers.ValidationError(f"La calificación debe ser una de las siguientes opciones: {opciones_validas}")
+        return value
+
+class AsistenciasSerializer(serializers.ModelSerializer):
+    alumno_nombre = serializers.ReadOnlyField(source='alumno.primer_nombre')
+    alumno_apellido = serializers.ReadOnlyField(source='alumno.primer_apellido')
+    alumno_cedula = serializers.ReadOnlyField(source='alumno.cedula_escolar')
+    grupo_nombre = serializers.ReadOnlyField(source='grupo.grado.nombre_grado')
+    seccion_nombre = serializers.ReadOnlyField(source='grupo.seccion.nombre_seccion')
+    estado_display = serializers.CharField(source='get_estado_display', read_only=True)
+
+    class Meta:
+        model = Asistencias
+        fields = '__all__'
+
+    def validate_estado(self, value):
+        opciones_validas = ['P', 'A', 'T', 'J']
+        if value not in opciones_validas:
+            raise serializers.ValidationError(f"El estado debe ser una de las siguientes opciones: {opciones_validas}")
+        return value
+
+ARCHIVO: apps/academico/views.py (Resumen)
+------------------------------------
+- AlumnosViewSet: CRUD alumnos + historial_inscripciones + por_sección
+- GruposAcademicosViewSet: CRUD grupos + alumnos_activos
+- InscripcionesViewSet: CRUD inscripciones
+- CalificacionesViewSet: CRUD calificaciones + por_alumno
+- AsistenciasViewSet: CRUD asistencias + estadisticas + estadisticas_alumno
+- exportar_asistencias_csv: Exportar asistencias en CSV
+- exportar_asistencias_excel: Exportar asistencias en Excel
+- exportar_asistencias_pdf: Exportar asistencias en PDF
+
+ARCHIVO: apps/academico/urls.py
+-------------------------------
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import (
+    AlumnosViewSet, GruposAcademicosViewSet,
+    InscripcionesViewSet, CalificacionesViewSet, AsistenciasViewSet,
+    exportar_asistencias_csv, exportar_asistencias_excel, exportar_asistencias_pdf
+)
+
+router = DefaultRouter()
+router.register(r'alumnos', AlumnosViewSet)
+router.register(r'grupos', GruposAcademicosViewSet)
+router.register(r'inscripciones', InscripcionesViewSet)
+router.register(r'calificaciones', CalificacionesViewSet)
+router.register(r'asistencias', AsistenciasViewSet)
+
+urlpatterns = [
+    path('asistencias/exportar-csv/', exportar_asistencias_csv, name='exportar_asistencias_csv'),
+    path('asistencias/exportar-excel/', exportar_asistencias_excel, name='exportar_asistencias_excel'),
+    path('asistencias/exportar-pdf/', exportar_asistencias_pdf, name='exportar_asistencias_pdf'),
+    path('', include(router.urls)),
+]
+
+================================================================================
+6. TEMPLATE SWAGGER UI PERSONALIZADO
+================================================================================
+
+ARCHIVO: templates/drf-yasg/swagger-ui.html
+---------------------------------------------
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Documentación de la API - Plataforma Escolar</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui.css">
+    <link rel="icon" type="image/png" href="https://unpkg.com/swagger-ui-dist@5.10.5/favicon-32x32.png" sizes="32x32" />
+    <style>
+        html { box-sizing: border-box; }
+        *, *:before, *:after { box-sizing: inherit; }
+        body { margin: 0; background: #fafafa; }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.10.5/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            const ui = SwaggerUIBundle({
+                url: "/swagger.json",
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "BaseLayout"
+            });
+            window.ui = ui;
+        };
+    </script>
+</body>
+</html>
+
+================================================================================
+7. ENDPOINTS DE LA API
+================================================================================
+
+MÓDULO CORE (/api/core/):
+- GET/POST /api/core/direcciones/
+- GET/POST /api/core/plantel/
+- GET/POST /api/core/periodos/
+- GET/POST /api/core/niveles/
+- GET/POST /api/core/turnos/
+- GET/POST /api/core/grados/
+- GET/POST /api/core/secciones/
+- GET/POST /api/core/usuarios/
+
+MÓDULO PERSONAL (/api/personal/):
+- GET/POST /api/personal/profesores/
+- GET/POST /api/personal/representantes/
+- GET/POST /api/personal/alumno-representante/
+- GET /api/personal/exportar-csv/ (Exportar alumnos-representantes CSV)
+- GET /api/personal/exportar-excel/ (Exportar alumnos-representantes Excel)
+- GET /api/personal/exportar-pdf/ (Exportar alumnos-representantes PDF)
+
+MÓDULO ACADÉMICO (/api/academico/):
+- GET/POST /api/academico/alumnos/
+- GET /api/academico/alumnos/{id}/historial_inscripciones/
+- GET /api/academico/alumnos/por_seccion/?grado=X&seccion=Y&periodo=Z
+- GET/POST /api/academico/grupos/
+- GET /api/academico/grupos/{id}/alumnos-activos/
+- GET/POST /api/academico/inscripciones/
+- GET/POST /api/academico/calificaciones/
+- GET /api/academico/calificaciones/por_alumno/?alumno_id=X
+- GET/POST /api/academico/asistencias/
+- GET /api/academico/asistencias/estadisticas/?grupo_id=X&fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD
+- GET /api/academico/asistencias/estadisticas_alumno/?alumno_id=X&fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD
+- GET /api/academico/asistencias/exportar-csv/?grupo_id=X&fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD
+- GET /api/academico/asistencias/exportar-excel/?grupo_id=X&fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD
+- GET /api/academico/asistencias/exportar-pdf/?grupo_id=X&fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD
+
+DOCUMENTACIÓN:
+- GET /swagger/ (Swagger UI)
+- GET /redoc/ (ReDoc)
+- GET /swagger.json (Esquema JSON)
+- GET /swagger.yaml (Esquema YAML)
+
+================================================================================
+8. CARACTERÍSTICAS ESPECIALES
+================================================================================
+
+SISTEMA DE ASISTENCIAS:
+- Estados: P (Presente), A (Ausente), T (Tarde), J (Justificado)
+- Restricción única: Un alumno solo puede tener un registro por fecha y grupo
+- Profesores pueden registrar y actualizar asistencias
+- Estadísticas por grupo y por alumno
+- Porcentaje de asistencia calculado automáticamente
+- Exportación en CSV, Excel y PDF con filtros por grupo y rango de fechas
+
+EXPORTACIONES:
+- Personal: Exporta alumnos y representantes con nombres, teléfonos, parentesco
+- Asistencias: Exporta registros con nombre alumno, cédula escolar, grado, sección, estado, observaciones
+- Formatos: CSV, Excel (con estilos), PDF (con diseño institucional)
+- Filtros: Por grupo, rango de fechas
+
+PERMISOS:
+- EsProfesorOAdmin: Solo permite acceso a usuarios con rol 'profesor' o 'admin'
+- Exportaciones: Permisos AllowAny (acceso público)
+
+VALIDACIONES:
+- Calificaciones: Solo acepta 'A', 'B', 'C', 'D'
+- Asistencias: Solo acepta 'P', 'A', 'T', 'J'
+
+BASE DE DATOS:
+- managed = False (Django no modifica la estructura de la base de datos)
+- Tablas existentes creadas con script SQL externo
+- Mapeo explícito de columnas con db_column
+
+================================================================================
+9. INSTRUCCIONES DE INSTALACIÓN Y EJECUCIÓN
+================================================================================
+
+1. Crear entorno virtual:
+   python -m venv venv
+   source venv/bin/activate  # Linux/Mac
+   venv\Scripts\activate  # Windows
+
+2. Instalar dependencias:
+   pip install -r requirements.txt
+
+3. Configurar archivo .env con credenciales de base de datos
+
+4. Crear base de datos y usuario en MariaDB:
+   CREATE DATABASE plataforma_escolar CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER 'admin_plataforma'@'localhost' IDENTIFIED BY 'tu_contraseña';
+   GRANT ALL PRIVILEGES ON plataforma_escolar.* TO 'admin_plataforma'@'localhost';
+   FLUSH PRIVILEGES;
+
+5. Ejecutar script SQL de tablas:
+   mariadb -u admin_plataforma -p plataforma_escolar < planter_educativo_v12.sql
+
+6. Crear tabla de asistencias:
+   mariadb -u admin_plataforma -p plataforma_escolar < crear_tabla_asistencias.sql
+
+7. Ejecutar migraciones:
+   python manage.py makemigrations
+   python manage.py migrate
+
+8. Poblar datos de prueba:
+   python poblar_datos_prueba.py
+
+9. Ejecutar servidor:
+   python manage.py runserver
+
+10. Acceder a Swagger UI:
+    http://localhost:8000/swagger/
+
+================================================================================
+10. ESTRUCTURA DE LA BASE DE DATOS
+================================================================================
+
+TABLAS PRINCIPALES:
+- configuracion_plantel: Datos generales del plantel
+- periodos_academicos: Catálogo de períodos escolares
+- niveles_educativos: Catálogo de niveles (Primaria, Secundaria, etc.)
+- turnos: Catálogo de turnos (Mañana, Tarde)
+- grados_academicos: Grados por nivel
+- secciones: Secciones (A, B, C, etc.)
+- direcciones: Direcciones físicas
+- usuarios: Usuarios del sistema con roles
+- profesores: Información docente
+- alumnos: Datos detallados de estudiantes
+- representantes_legales: Información de representantes
+- alumno_representante: Relación alumno-representante
+- grupos_academicos: Combinación grado/sección/turno/periodo
+- inscripciones: Inscripción de alumnos en grupos
+- calificaciones: Calificaciones (A, B, C, D)
+- asistencias: Registro diario de asistencia (P, A, T, J)
+
+================================================================================
+11. CORRECCIONES IMPORTANTES APLICADAS
+================================================================================
+
+Según reporte técnico de auditoría:
+- Se corrigieron serializers para usar nombres correctos de campos (id_nivel, id_direccion_residencia, etc.)
+- Se eliminó campo fantasma 'grado_nombre' de SeccionesSerializer
+- Se cambió validador de calificaciones de escala numérica a ENUM (A, B, C, D)
+- Se eliminaron filtros fantasma en CalificacionesViewSet (materia_asignatura, lapso_periodo)
+- Se corrigieron filtroset_fields y search_fields con campos correctos
+- Se agregó permiso AllowAny a exportaciones para acceso sin autenticación
+
+================================================================================
+12. SCRIPT SQL DE ASISTENCIAS
+================================================================================
+
+El archivo crear_tabla_asistencias.sql contiene la definición de la tabla asistencias
+con todas las restricciones, índices y claves foráneas necesarias.
+
+================================================================================
+FIN DE LA DOCUMENTACIÓN
+================================================================================

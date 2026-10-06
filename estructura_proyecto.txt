@@ -1,0 +1,252 @@
+================================================================================
+ESTRUCTURA DEL PROYECTO - PLATAFORMA ESCOLAR BACKEND
+Proyecto: Django REST Framework + MariaDB
+Fecha: 3 de octubre de 2026
+================================================================================
+
+plataforma_escolar_backend/
+├── config/                          # Configuración principal
+│   ├── settings.py                  # Configuración Django
+│   ├── urls.py                      # URLs principales + Swagger
+│   ├── asgi.py                      # Configuración ASGI
+│   └── wsgi.py                      # Configuración WSGI
+│
+├── apps/                            # Aplicaciones modulares
+│   ├── core/                        # Módulo Core
+│   │   ├── __init__.py
+│   │   ├── apps.py                    # Configuración app
+│   │   ├── models.py                 # Modelos: Direcciones, Configuración, Catálogos
+│   │   ├── serializers.py             # Serializers del módulo
+│   │   ├── views.py                   # ViewSets del módulo
+│   │   ├── urls.py                    # URLs del módulo
+│   │   └── migrations/                # Migraciones
+│   │       ├── __init__.py
+│   │       ├── 0001_initial.py
+│   │       └── 0002_alter_configuracionplantel_options_and_more.py
+│   │
+│   ├── personal/                    # Módulo Personal
+│   │   ├── __init__.py
+│   │   ├── apps.py                    # Configuración app
+│   │   ├── models.py                 # Modelos: Profesores, Representantes, Alumno-Representante
+│   │   ├── serializers.py             # Serializers del módulo
+│   │   ├── views.py                   # ViewSets + Exportaciones (CSV, Excel, PDF)
+│   │   ├── urls.py                    # URLs del módulo
+│   │   └── migrations/                # Migraciones
+│   │       ├── __init__.py
+│   │       └── 0001_initial.py
+│   │
+│   └── academico/                   # Módulo Académico
+│       ├── __init__.py
+│       ├── apps.py                    # Configuración app
+│       ├── models.py                 # Modelos: Alumnos, Grupos, Inscripciones, Calificaciones, Asistencias
+│       ├── serializers.py             # Serializers del módulo
+│       ├── views.py                   # ViewSets + Estadísticas + Exportaciones
+│       ├── permissions.py             # Permisos personalizados
+│       ├── urls.py                    # URLs del módulo
+│       └── migrations/                # Migraciones
+│           ├── __init__.py
+│           └── 0001_initial.py
+│               └── 0002_asistencias.py
+│
+├── plataforma_escolar_backend/      # Directorio Django original (legacy)
+│   ├── __init__.py
+│   ├── settings.py                  # Settings antiguo (no usado)
+│   ├── urls.py                      # URLs antiguo (no usado)
+│   ├── asgi.py                      # ASGI antiguo (no usado)
+│   └── wsgi.py                      # WSGI antiguo (no usado)
+│
+├── templates/                       # Templates Django
+│   └── drf-yasg/
+│       └── swagger-ui.html          # Template personalizado de Swagger UI
+│
+├── static/                          # Archivos estáticos
+│
+├── venv/                            # Entorno virtual Python
+│
+├── manage.py                        # Script de gestión Django
+├── poblar_datos_prueba.py            # Script para poblar datos de prueba
+├── crear_tabla_asistencias.sql        # Script SQL para crear tabla asistencias
+├── requirements.txt                  # Dependencias Python
+├── .env                             # Variables de entorno
+├── plataforma_backend_completo.txt  # Documentación antigua
+├── plataforma_escolar_completo_actualizado.txt  # Documentación actualizada
+└── reporte_modificaciones.txt       # Reporte de cambios recientes
+
+================================================================================
+DESCRIPIÓN DE DIRECTORIOS Y ARCHIVOS PRINCIPALES
+================================================================================
+
+config/
+-----
+Directorio de configuración principal del proyecto. Contiene toda la
+configuración de Django incluyendo:
+- settings.py: Configuración de base de datos, middleware, apps instaladas
+- urls.py: URLs raíz, incluyendo rutas de Swagger UI y módulos
+- asgi.py: Configuración para servidor ASGI
+- wsgi.py: Configuración para servidor WSGI
+
+apps/
+-----
+Contiene las aplicaciones modulares del proyecto. Cada módulo representa
+un área funcional del sistema escolar.
+
+apps/core/
+----------
+Módulo que contiene configuraciones generales y catálogos:
+- Direcciones: Información de direcciones físicas
+- ConfiguracionPlantel: Datos generales del plantel educativo
+- PeriodosAcademicos: Catálogo de períodos escolares
+- NivelesEducativos: Catálogo de niveles (Primaria, Secundaria, etc.)
+- Turnos: Catálogo de turnos (Mañana, Tarde)
+- GradosAcademicos: Grados por nivel educativo
+- Secciones: Secciones (A, B, C, etc.)
+- Usuarios: Usuarios del sistema con roles (admin, profesor, alumno, etc.)
+
+apps/personal/
+-------------
+Módulo para gestión de personal y representantes:
+- Profesores: Información docente con especialidad
+- RepresentantesLegales: Información de representantes legales
+- AlumnoRepresentante: Relación entre alumnos y representantes
+- Exportaciones: Funciones para exportar datos en CSV, Excel, PDF
+
+apps/academico/
+--------------
+Módulo académico principal:
+- Alumnos: Información completa de estudiantes
+- GruposAcademicos: Combinación de grado/sección/turno/periodo
+- Inscripciones: Inscripción de alumnos en grupos
+- Calificaciones: Calificaciones de alumnos (A, B, C, D)
+- Asistencias: Registro diario de asistencia (P, A, T, J)
+- Estadísticas: Cálculos de porcentaje de asistencia
+- Exportaciones: Reportes de asistencia en múltiples formatos
+
+templates/
+----------
+Contiene templates personalizados de Django. Actualmente contiene:
+- drf-yasg/swagger-ui.html: Template personalizado para Swagger UI con CDN
+  externos y configuración específica
+
+static/
+-------
+Directorio para archivos estáticos (CSS, JS, imágenes) generados por Django.
+
+venv/
+----
+Entorno virtual Python que contiene todas las dependencias del proyecto.
+Debe activarse antes de ejecutar comandos Django.
+
+Archivos de configuración raíz:
+-----------------------------
+- manage.py: Script de gestión de Django (runserver, migrate, etc.)
+- requirements.txt: Lista de dependencias Python
+- .env: Variables de entorno (credenciales de base de datos, clave secreta, etc.)
+- poblar_datos_prueba.py: Script para generar datos de prueba en la base de datos
+- crear_tabla_asistencias.sql: Script SQL para crear la tabla de asistencias
+
+Archivos de documentación:
+------------------------
+- plataforma_backend_completo.txt: Documentación completa del proyecto (antigua)
+- plataforma_escolar_completo_actualizado.txt: Documentación actualizada con sistema de asistencias
+- reporte_modificaciones.txt: Reporte detallado de cambios realizados
+
+================================================================================
+MODELOS DE BASE DE DATOS
+================================================================================
+
+MÓDULO CORE:
+- Direcciones (id_direccion, calle, ciudad, estado, referencia)
+- ConfiguracionPlantel (id_config, nombre_plantel, codigo_estadistico, codigo_plantel, id_director_actual, id_subdirector_actual, codigo_dea)
+- PeriodosAcademicos (id_periodo, codigo_periodo, nombre_periodo, fecha_inicio, fecha_fin, activo)
+- NivelesEducativos (id_nivel, nombre_nivel)
+- Turnos (id_turno, nombre_turno)
+- GradosAcademicos (id_grado, id_nivel, nombre_grado, orden)
+- Secciones (id_seccion, nombre_seccion)
+- Usuarios (id_usuario, nombre_usuario, clave_hash, email, rol, activo, fecha_creacion)
+
+MÓDULO PERSONAL:
+- Profesores (id_profesor, id_usuario, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, cedula, especialidad)
+- RepresentantesLegales (id_representante, id_direccion_residencia, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, cedula, carnet_patria, telefono_principal, telefono_secundario, email, ocupacion)
+- AlumnoRepresentante (alumno, representante, parentesco, es_principal)
+
+MÓDULO ACADÉMICO:
+- Alumnos (id_alumno, id_usuario, id_direccion_residencia, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, tipo_documento_identidad, numero_documento_identidad, cedula_escolar, fecha_nacimiento, genero, lugar_nacimiento, nacionalidad, grupo_sanguineo, peso_kg, talla_cm, fecha_inscripcion_inicial, estatus_general)
+- GruposAcademicos (id_grupo, periodo, nivel, grado, seccion, turno, profesor_director, cupo_maximo)
+- Inscripciones (id_inscripcion, alumno, grupo, fecha_inscripcion, estado_inscripcion, monto_pago, referencia_bancaria)
+- Calificaciones (id_calificacion, inscripcion, profesor, calificacion, fecha_registro)
+- Asistencias (id_asistencia, fecha, alumno, grupo, estado, observaciones, profesor_registro, fecha_registro)
+
+================================================================================
+DEPENDENCIAS PRINCIPALES
+================================================================================
+
+Framework y ORM:
+- Django==5.0.14
+- djangorestframework==3.17.2
+
+Base de datos:
+- mysqlclient==2.3.0
+
+Documentación API:
+- drf-yasg==1.21.15
+- PyYAML==6.0.3
+
+Exportación de datos:
+- openpyxl==3.1.5 (Excel)
+- reportlab==5.0.1 (PDF)
+- csv (biblioteca estándar Python)
+
+Configuración:
+- django-environ==0.14.0
+- python-dotenv==1.2.3
+- django-cors-headers==4.9.0
+
+Otros:
+- pillow==12.3.0 (manejo de imágenes)
+- pytz==2026.4 (zona horaria)
+
+================================================================================
+ENDPOINTS PRINCIPALES
+================================================================================
+
+Configuración:
+- GET /swagger/ (Swagger UI)
+- GET /redoc/ (ReDoc)
+- GET /swagger.json (Esquema JSON)
+- GET /swagger.yaml (Esquema YAML)
+
+Core (/api/core/):
+- /api/core/direcciones/
+- /api/core/plantel/
+- /api/core/periodos/
+- /api/core/niveles/
+- /api/core/turnos/
+- /api/core/grados/
+- /api/core/secciones/
+- /api/core/usuarios/
+
+Personal (/api/personal/):
+- /api/personal/profesores/
+- /api/personal/representantes/
+- /api/personal/alumno-representante/
+- /api/personal/exportar-csv/
+- /api/personal/exportar-excel/
+- /api/personal/exportar-pdf/
+
+Académico (/api/academico/):
+- /api/academico/alumnos/
+- /api/academico/alumnos/por_seccion/
+- /api/academico/grupos/
+- /api/academico/grupos/{id}/alumnos-activos/
+- /api/academico/inscripciones/
+- /api/academico/calificaciones/
+- /api/academico/asistencias/
+- /api/academico/asistencias/estadisticas/
+- /api/academico/asistencias/estadisticas_alumno/
+- /api/academico/asistencias/exportar-csv/
+- /api/academico/asistencias/exportar-excel/
+- /api/academico/asistencias/exportar-pdf/
+
+================================================================================
+FIN DE LA ESTRUCTURA
+================================================================================

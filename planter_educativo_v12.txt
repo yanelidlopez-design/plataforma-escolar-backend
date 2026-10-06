@@ -1,0 +1,316 @@
+-- ============================================================================
+-- Script:          plataforma_escolar_v12_final_final.sql
+-- Descripción:     Esquema de base de datos para la plataforma escolar.
+--                  Basado en la especificación v7, con todas las correcciones
+--                  de errores de parsing, default values y duplicidad de índices.
+-- Autor:           Hermes Agent
+-- Fecha:           2023-10-27
+-- ============================================================================
+
+-- -----------------------------------------------------
+-- Creación y selección de la base de datos
+-- -----------------------------------------------------
+
+DELIMITER //
+
+DROP DATABASE IF EXISTS `plataforma_escolar`//
+CREATE DATABASE IF NOT EXISTS `plataforma_escolar` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci//
+USE `plataforma_escolar`//
+
+DELIMITER ;
+
+-- ============================================================================
+-- TABLAS
+-- ============================================================================
+
+-- 1. Tabla de Configuración del Plantel (Datos Generales del Plantel)
+CREATE TABLE IF NOT EXISTS `configuracion_plantel` (
+  `id_config` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nombre_plantel` VARCHAR(255) NOT NULL,
+  `codigo_estadistico` VARCHAR(50) NOT NULL UNIQUE,
+  `codigo_plantel` VARCHAR(50) NOT NULL UNIQUE,
+  `id_director_actual` INT UNSIGNED NULL,
+  `id_subdirector_actual` INT UNSIGNED NULL,
+  PRIMARY KEY (`id_config`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2. periodos_academicos (Catálogo de Períodos)
+CREATE TABLE IF NOT EXISTS `periodos_academicos` (
+  `id_periodo` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `codigo_periodo` VARCHAR(50) NOT NULL UNIQUE,
+  `nombre_periodo` VARCHAR(100) NOT NULL,
+  `fecha_inicio` DATE NOT NULL,
+  `fecha_fin` DATE NOT NULL,
+  `activo` BOOLEAN NOT NULL DEFAULT TRUE,
+  PRIMARY KEY (`id_periodo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 3. niveles_educativos (Catálogo de Niveles)
+CREATE TABLE IF NOT EXISTS `niveles_educativos` (
+  `id_nivel` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nombre_nivel` VARCHAR(100) NOT NULL UNIQUE,
+  PRIMARY KEY (`id_nivel`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. turnos (Catálogo de Turnos)
+CREATE TABLE IF NOT EXISTS `turnos` (
+  `id_turno` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nombre_turno` VARCHAR(100) NOT NULL UNIQUE,
+  PRIMARY KEY (`id_turno`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 5. grados_academicos (Catálogo de Grados)
+CREATE TABLE IF NOT EXISTS `grados_academicos` (
+  `id_grado` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_nivel` TINYINT UNSIGNED NOT NULL,
+  `nombre_grado` VARCHAR(50) NOT NULL,
+  `orden` INT NULL,
+  PRIMARY KEY (`id_grado`),
+  UNIQUE KEY (`id_nivel`, `nombre_grado`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 6. secciones (Catálogo de Secciones)
+CREATE TABLE IF NOT EXISTS `secciones` (
+  `id_seccion` TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nombre_seccion` VARCHAR(50) NOT NULL UNIQUE,
+  PRIMARY KEY (`id_seccion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7. direcciones (Detalle de Direcciones)
+CREATE TABLE IF NOT EXISTS `direcciones` (
+  `id_direccion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `calle` VARCHAR(255) NOT NULL,
+  `ciudad` VARCHAR(100) NOT NULL,
+  `estado` VARCHAR(100) NOT NULL,
+  `referencia` TEXT NULL,
+  PRIMARY KEY (`id_direccion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8. usuarios (Acceso al Sistema)
+CREATE TABLE IF NOT EXISTS `usuarios` (
+`id_usuario` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `nombre_usuario` VARCHAR(100) NOT NULL UNIQUE,
+  `clave_hash` VARCHAR(255) NOT NULL,
+  `email` VARCHAR(150) NOT NULL UNIQUE,
+  `rol` VARCHAR(50) NOT NULL,
+  `activo` BOOLEAN NOT NULL DEFAULT TRUE,
+  `fecha_creacion` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_usuario`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 9. profesores (Información Docente)
+CREATE TABLE IF NOT EXISTS `profesores` (
+  `id_profesor` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NOT NULL,
+  `primer_nombre` VARCHAR(150) NOT NULL,
+  `segundo_nombre` VARCHAR(150) NULL,
+  `primer_apellido` VARCHAR(150) NOT NULL,
+  `segundo_apellido` VARCHAR(150) NULL,
+  `cedula` VARCHAR(30) NOT NULL UNIQUE,
+  `especialidad` VARCHAR(150) NULL,
+  PRIMARY KEY (`id_profesor`),
+  UNIQUE KEY `uk_profesor_id_usuario` (`id_usuario`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. alumnos (Datos Detallados del Estudiante)
+CREATE TABLE IF NOT EXISTS `alumnos` (
+  `id_alumno` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_usuario` INT UNSIGNED NULL,
+  `id_direccion_residencia` INT UNSIGNED NULL,
+  `primer_nombre` VARCHAR(150) NOT NULL,
+  `segundo_nombre` VARCHAR(150) NULL,
+  `primer_apellido` VARCHAR(150) NOT NULL,
+  `segundo_apellido` VARCHAR(150) NULL,
+  `tipo_documento_identidad` VARCHAR(50) NOT NULL,
+  `numero_documento_identidad` VARCHAR(30) NOT NULL UNIQUE,
+  `cedula_escolar` VARCHAR(30) NULL,
+  `fecha_nacimiento` DATE NOT NULL,
+  `genero` ENUM('Masculino', 'Femenino', 'Otro') NOT NULL,
+  `lugar_nacimiento` VARCHAR(255) NULL,
+  `nacionalidad` VARCHAR(100) NULL,
+  `entidad_federal_nacimiento` VARCHAR(100) NULL,
+  `municipio_nacimiento` VARCHAR(100) NULL,
+  `parroquia_nacimiento` VARCHAR(100) NULL,
+  `condicion_fisica` TEXT NULL,
+  `grupo_sanguineo` VARCHAR(10) NULL,
+  `apoyo_escolar` BOOLEAN DEFAULT FALSE,
+  `vacunas_completas` BOOLEAN DEFAULT FALSE,
+  `alergico_a` TEXT NULL,
+  `tratamiento_medico` TEXT NULL,
+  `peso_kg` DECIMAL(5, 2) NULL,
+  `talla_cm` DECIMAL(5, 2) NULL,
+  `talla_camisa` VARCHAR(20) NULL,
+  `talla_pantalon` VARCHAR(20) NULL,
+  `talla_zapato` VARCHAR(20) NULL,
+  `estado_civil_padres` VARCHAR(50) NULL,
+  `ingreso_familiar` DECIMAL(10, 2) NULL,
+  `profesion_madre` VARCHAR(150) NULL,
+  `profesion_padre` VARCHAR(150) NULL,
+  `tipo_vivienda` VARCHAR(50) NULL,
+  `numero_hermanos` INT NULL,
+  `numero_en_el_planter` INT NULL,
+  `discapacidad` BOOLEAN DEFAULT FALSE,
+  `tipo_discapacidad` TEXT NULL,
+  `observaciones` TEXT NULL,
+  `fecha_inscripcion_inicial` DATE NOT NULL,
+  `estatus_general` ENUM('Activo', 'Retirado', 'Egresado', 'Otro') NOT NULL DEFAULT 'Activo',
+  PRIMARY KEY (`id_alumno`),
+  UNIQUE KEY `uk_alumno_id_usuario` (`id_usuario`),
+  UNIQUE KEY `uk_alumno_numero_documento` (`tipo_documento_identidad`, `numero_documento_identidad`),
+  UNIQUE KEY `uk_alumno_cedula_escolar` (`cedula_escolar`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 11. representantes_legales (Información del Representante)
+CREATE TABLE IF NOT EXISTS `representantes_legales` (
+  `id_representante` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_direccion_residencia` INT UNSIGNED NULL,
+  `primer_nombre` VARCHAR(150) NOT NULL,
+  `segundo_nombre` VARCHAR(150) NULL,
+  `primer_apellido` VARCHAR(150) NOT NULL,
+  `segundo_apellido` VARCHAR(150) NULL,
+  `cedula` VARCHAR(30) NOT NULL UNIQUE,
+  `carnet_patria` VARCHAR(50) NULL,
+  `telefono_principal` VARCHAR(25) NOT NULL,
+  `telefono_secundario` VARCHAR(25) NULL,
+  `email` VARCHAR(150) NULL,
+  `ocupacion` VARCHAR(100) NULL,
+  PRIMARY KEY (`id_representante`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 12. alumno_representante (Tabla de unión Alumno-Representante)
+CREATE TABLE IF NOT EXISTS `alumno_representante` (
+  `id_alumno` INT UNSIGNED NOT NULL,
+`id_representante` INT UNSIGNED NOT NULL,
+  `parentesco` VARCHAR(50) NOT NULL,
+  `es_principal` BOOLEAN DEFAULT FALSE,
+  PRIMARY KEY (`id_alumno`, `id_representante`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13. grupos_academicos (Combinación de Grado/Sección/Turno/Periodo)
+CREATE TABLE IF NOT EXISTS `grupos_academicos` (
+  `id_grupo` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_periodo` INT UNSIGNED NOT NULL,
+  `id_nivel` TINYINT UNSIGNED NOT NULL,
+  `id_grado` TINYINT UNSIGNED NOT NULL,
+  `id_seccion` TINYINT UNSIGNED NOT NULL,
+  `id_turno` TINYINT UNSIGNED NOT NULL,
+  `id_profesor_principal` INT UNSIGNED NULL,
+  `cupo_maximo` SMALLINT UNSIGNED NOT NULL DEFAULT 30,
+  PRIMARY KEY (`id_grupo`),
+  UNIQUE KEY `uk_grupo_academico` (`id_periodo`, `id_nivel`, `id_grado`, `id_seccion`, `id_turno`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 14. inscripciones (Inscripción del Alumno en un Grupo)
+CREATE TABLE IF NOT EXISTS `inscripciones` (
+  `id_inscripcion` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_alumno` INT UNSIGNED NOT NULL,
+  `id_grupo` INT UNSIGNED NOT NULL,
+  `fecha_inscripcion` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `estado_inscripcion` ENUM('Activa', 'Retirado', 'Egresado') NOT NULL DEFAULT 'Activa',
+  `monto_pago` DECIMAL(10, 2) NULL,
+  `referencia_bancaria` VARCHAR(100) NULL,
+  PRIMARY KEY (`id_inscripcion`),
+  UNIQUE KEY `uk_inscripcion_alumno_grupo` (`id_alumno`, `id_grupo`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 15. calificaciones (Registro de Calificaciones)
+CREATE TABLE IF NOT EXISTS `calificaciones` (
+  `id_calificacion` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id_inscripcion` INT UNSIGNED NOT NULL,
+  `id_profesor` INT UNSIGNED NULL,
+  `calificacion` ENUM('A', 'B', 'C', 'D') NOT NULL,
+  `fecha_registro` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id_calificacion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- ============================================================================
+-- CLAVES FORÁNEAS (Foreign Keys)
+-- ============================================================================
+
+-- Tabla: configuracion_plantel
+ALTER TABLE `configuracion_plantel`
+  ADD CONSTRAINT `fk_config_director_actual` FOREIGN KEY (`id_director_actual`) REFERENCES `profesores` (`id_profesor`) ON DELETE SET NULL ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_config_subdirector_actual` FOREIGN KEY (`id_subdirector_actual`) REFERENCES `profesores` (`id_profesor`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Tabla: grados_academicos
+ALTER TABLE `grados_academicos`
+  ADD CONSTRAINT `fk_grados_id_nivel` FOREIGN KEY (`id_nivel`) REFERENCES `niveles_educativos` (`id_nivel`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Tabla: profesores
+ALTER TABLE `profesores`
+  ADD CONSTRAINT `fk_profesor_id_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Tabla: alumnos
+ALTER TABLE `alumnos`
+  ADD CONSTRAINT `fk_alumno_id_usuario` FOREIGN KEY (`id_usuario`) REFERENCES `usuarios` (`id_usuario`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_alumno_id_direccion_residencia` FOREIGN KEY (`id_direccion_residencia`) REFERENCES `direcciones` (`id_direccion`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Tabla: representantes_legales
+ALTER TABLE `representantes_legales`
+  ADD CONSTRAINT `fk_representante_id_direccion_residencia` FOREIGN KEY (`id_direccion_residencia`) REFERENCES `direcciones` (`id_direccion`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Tabla: alumno_representante
+ALTER TABLE `alumno_representante`
+  ADD CONSTRAINT `fk_alum_rep_id_alumno` FOREIGN KEY (`id_alumno`) REFERENCES `alumnos` (`id_alumno`) ON DELETE CASCADE ON UPDATE CASCADE,
+ADD CONSTRAINT `fk_alum_rep_id_representante` FOREIGN KEY (`id_representante`) REFERENCES `representantes_legales` (`id_representante`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Tabla: grupos_academicos
+ALTER TABLE `grupos_academicos`
+  ADD CONSTRAINT `fk_grupo_id_periodo` FOREIGN KEY (`id_periodo`) REFERENCES `periodos_academicos` (`id_periodo`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_grupo_id_nivel` FOREIGN KEY (`id_nivel`) REFERENCES `niveles_educativos` (`id_nivel`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_grupo_id_grado` FOREIGN KEY (`id_grado`) REFERENCES `grados_academicos` (`id_grado`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_grupo_id_seccion` FOREIGN KEY (`id_seccion`) REFERENCES `secciones` (`id_seccion`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_grupo_id_turno` FOREIGN KEY (`id_turno`) REFERENCES `turnos` (`id_turno`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_grupo_id_profesor_principal` FOREIGN KEY (`id_profesor_principal`) REFERENCES `profesores` (`id_profesor`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- Tabla: inscripciones
+ALTER TABLE `inscripciones`
+  ADD CONSTRAINT `fk_inscripcion_id_alumno` FOREIGN KEY (`id_alumno`) REFERENCES `alumnos` (`id_alumno`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_inscripcion_id_grupo` FOREIGN KEY (`id_grupo`) REFERENCES `grupos_academicos` (`id_grupo`) ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- Tabla: calificaciones
+ALTER TABLE `calificaciones`
+  ADD CONSTRAINT `fk_calificacion_id_inscripcion` FOREIGN KEY (`id_inscripcion`) REFERENCES `inscripciones` (`id_inscripcion`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_calificacion_id_profesor` FOREIGN KEY (`id_profesor`) REFERENCES `profesores` (`id_profesor`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+
+-- ============================================================================
+-- ÍNDICES ADICIONALES
+-- ============================================================================
+CREATE INDEX `idx_alumnos_primer_nombre_primer_apellido` ON `alumnos` (`primer_nombre`, `primer_apellido`);
+CREATE INDEX `idx_representantes_primer_nombre_primer_apellido` ON `representantes_legales` (`primer_nombre`, `primer_apellido`);
+CREATE INDEX `idx_profesores_primer_nombre_primer_apellido` ON `profesores` (`primer_nombre`, `primer_apellido`);
+CREATE INDEX `idx_inscripciones_fecha` ON `inscripciones` (`fecha_inscripcion`);
+CREATE INDEX `idx_calificaciones_fecha` ON `calificaciones` (`fecha_registro`);
+
+
+-- ============================================================================
+-- TRIGGERS
+-- ============================================================================
+DELIMITER //
+CREATE TRIGGER `trg_after_delete_alumno_representante`
+AFTER DELETE ON `alumno_representante`
+FOR EACH ROW
+BEGIN
+    DECLARE v_representante_count INT;
+
+    SELECT COUNT(*)
+    INTO v_representante_count
+    FROM `alumno_representante`
+    WHERE `id_representante` = OLD.`id_representante`;
+
+    IF v_representante_count = 0 THEN
+        DELETE FROM `representantes_legales`
+        WHERE `id_representante` = OLD.`id_representante`;
+    END IF;
+END //
+DELIMITER ;
+
+-- ============================================================================
+-- Fin del script
+-- ============================================================================
+
+#ultima modificacion que se hizo para correr el poblado del backend que no es necesaria porque existe el codigo_plantel
+
+ALTER TABLE configuracion_plantel ADD COLUMN codigo_dea VARCHAR(50) UNIQUE NULL;
