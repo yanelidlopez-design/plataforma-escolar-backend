@@ -67,7 +67,8 @@ class AlumnoRepresentante(models.Model):
         'academico.Alumnos',
         on_delete=models.CASCADE,
         db_column='id_alumno',
-        primary_key=True
+        primary_key=True,
+        related_name='representantes_vinculados',
     )
     representante = models.ForeignKey(
         RepresentantesLegales,

@@ -1,5 +1,6 @@
 from rest_framework import permissions
 
+
 # Roles que tienen acceso a los viewsets protegidos.
 ROLES_PERMITIDOS = ('profesor', 'admin')
 
@@ -50,6 +51,8 @@ class EsProfesorOAdmin(permissions.BasePermission):
     Permiso personalizado que solo permite acceso a usuarios con rol
     'profesor' o 'admin', resolviendo el rol sobre el sistema de
     autenticación actual (auth.User + JWT / sesión / basic).
+
+    Fail-closed: si no se puede resolver un rol, se niega el acceso.
     """
 
     def has_permission(self, request, view):
@@ -59,6 +62,21 @@ class EsProfesorOAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         rol = obtener_rol_usuario(request.user)
         return rol in ROLES_PERMITIDOS
+
+
+class EsAdministrador(permissions.BasePermission):
+    """
+    Permiso personalizado que solo permite acceso a usuarios con rol
+    'admin'. Fail-closed: si no se puede resolver un rol, se niega el acceso.
+    """
+
+    def has_permission(self, request, view):
+        rol = obtener_rol_usuario(request.user)
+        return rol == 'admin'
+
+    def has_object_permission(self, request, view, obj):
+        rol = obtener_rol_usuario(request.user)
+        return rol == 'admin'
 
 
 class IsAuthenticatedOrReadOnly(permissions.BasePermission):

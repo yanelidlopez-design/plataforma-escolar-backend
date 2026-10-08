@@ -17,22 +17,22 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from datetime import date
+from datetime import date, datetime
 from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer
 )
-from .permissions import EsProfesorOAdmin
+from .permissions import EsProfesorOAdmin, EsAdministrador
 from apps.core.models import ConfiguracionPlantel
 
 logger = logging.getLogger(__name__)
 
 @swagger_auto_schema(tags=['Alumnos'])
 class AlumnosViewSet(viewsets.ModelViewSet):
-    queryset = Alumnos.objects.select_related('id_direccion_residencia')
+    queryset = Alumnos.objects.select_related('id_direccion_residencia').prefetch_related('representantes_vinculados')
     serializer_class = AlumnosSerializer
-    permission_classes = [permissions.AllowAny]  # Temporalmente AllowAny para testing
+    permission_classes = [EsProfesorOAdmin]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['cedula_escolar', 'numero_documento_identidad', 'primer_nombre', 'primer_apellido']
     ordering_fields = ['primer_apellido', 'primer_nombre']
@@ -97,7 +97,7 @@ class AlumnosViewSet(viewsets.ModelViewSet):
 class GruposAcademicosViewSet(viewsets.ModelViewSet):
     queryset = GruposAcademicos.objects.select_related('periodo', 'grado', 'seccion', 'turno', 'profesor_director')
     serializer_class = GruposAcademicosSerializer
-    permission_classes = [permissions.AllowAny]  # Temporalmente AllowAny para testing
+    permission_classes = [EsAdministrador]
     filterset_fields = ['periodo', 'grado', 'seccion', 'turno', 'profesor_director']
 
     @swagger_auto_schema(
@@ -121,7 +121,7 @@ class GruposAcademicosViewSet(viewsets.ModelViewSet):
 class InscripcionesViewSet(viewsets.ModelViewSet):
     queryset = Inscripciones.objects.select_related('alumno', 'grupo', 'grupo__periodo')
     serializer_class = InscripcionesSerializer
-    permission_classes = [permissions.AllowAny]  # Temporalmente AllowAny para testing
+    permission_classes = [EsProfesorOAdmin]
     filterset_fields = ['estado_inscripcion', 'alumno', 'grupo']
     search_fields = ['alumno__primer_nombre', 'alumno__primer_apellido', 'alumno__cedula_escolar']
 
@@ -160,18 +160,50 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
     search_fields = ['alumno__primer_nombre', 'alumno__primer_apellido', 'alumno__cedula_escolar']
 
     def get_queryset(self):
-        """Filtrado por query params (django-filter no está disponible en este proyecto):
-        GET /api/academico/asistencias/?fecha=YYYY-MM-DD&grupo=<id>&estado=P&alumno=<id>"""
+        """
+        Filtrado manual por query params (django-filter NO está disponible; restricción del proyecto):
+        GET /api/academico/asistencias/?fecha=YYYY-MM-DD&grupo=<id>&estado=P&alumno=<id>
+
+        - Paginación deshabilitada: al filtrar por grupo/fecha se retorna el listado
+          completo en un solo paso (los grupos tardan 35-40 alumnos, sin necesidad de páginas).
+        - Valores inválidos se ignoran limpiamente para no romper la BD legacy.
+        - select_related('alumno', 'grupo') elimina las consultas N+1 al serializar.
+        """
         qs = super().get_queryset()
+
+        # --- Paginación: ignorar cualquier paginación global y devolver el listado completo ---
+        self.pagination_class = None
+
         params = self.request.query_params
-        if params.get('fecha'):
-            qs = qs.filter(fecha=params['fecha'])
-        if params.get('grupo'):
-            qs = qs.filter(grupo_id=params['grupo'])
-        if params.get('estado'):
-            qs = qs.filter(estado=params['estado'])
-        if params.get('alumno'):
-            qs = qs.filter(alumno_id=params['alumno'])
+
+        # --- fecha (YYYY-MM-DD) ---
+        fecha = (params.get('fecha') or '').strip()
+        if fecha:
+            try:
+                datetime.strptime(fecha, '%Y-%m-%d')
+            except ValueError:
+                fecha = ''  # formato inválido -> se ignora limpiamente
+        if fecha:
+            qs = qs.filter(fecha=fecha)
+
+        # --- grupo / alumno (enteros) ---
+        for param, campo in (('grupo', 'grupo_id'), ('alumno', 'alumno_id')):
+            valor = (params.get(param) or '').strip()
+            if valor:
+                try:
+                    qs = qs.filter(**{campo: int(valor)})
+                except (ValueError, TypeError):
+                    pass  # no numérico -> se ignora limpiamente
+
+        # --- estado (solo P/A/J válidos) ---
+        estado = (params.get('estado') or '').strip().upper()
+        estados_validos = {codigo for codigo, _ in Asistencias.ESTADO_CHOICES}
+        if estado in estados_validos:
+            qs = qs.filter(estado=estado)
+
+        # --- Optimización N+1: carga directa de alumno y grupo (extra: grado/seccion/profesor) ---
+        qs = qs.select_related('alumno', 'grupo')
+
         return qs
 
 
