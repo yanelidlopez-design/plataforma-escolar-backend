@@ -6,6 +6,8 @@ from drf_yasg import openapi
 from django.http import HttpResponse
 from django.conf import settings
 from django.utils import timezone
+from django.db import IntegrityError
+from django.db.models import ProtectedError
 import csv
 import hmac
 import logging
@@ -13,7 +15,8 @@ import re
 from xml.sax.saxutils import escape
 import openpyxl
 from openpyxl.styles import Font, PatternFill
-from reportlab.lib.pagesizes import letter
+from openpyxl.utils import get_column_letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -24,18 +27,195 @@ from .serializers import (
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
-from apps.core.models import ConfiguracionPlantel
+from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones
+from apps.core.serializers import GradosAcademicosSerializer, SeccionesSerializer
 
 logger = logging.getLogger(__name__)
 
 @swagger_auto_schema(tags=['Alumnos'])
 class AlumnosViewSet(viewsets.ModelViewSet):
-    queryset = Alumnos.objects.select_related('id_direccion_residencia').prefetch_related('representantes_vinculados')
+    queryset = Alumnos.objects.select_related('id_direccion_residencia', 'id_profesor_encargado').prefetch_related('representantes_vinculados')
     serializer_class = AlumnosSerializer
     permission_classes = [EsProfesorOAdmin]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['cedula_escolar', 'numero_documento_identidad', 'primer_nombre', 'primer_apellido']
     ordering_fields = ['primer_apellido', 'primer_nombre']
+    filter_fields = ['grado', 'seccion', 'estado_inscripcion']
+
+    # Encabezados únicos de las exportaciones (Excel/PDF/CSV) para que las 3
+    # vistas compartan exactamente las mismas columnas.
+    # Orden: identificación -> académico -> datos personales -> patria -> cuenta ->
+    #        dirección -> representante (tipo/doc/teléfono) -> profesor.
+    ALUMNOS_EXPORT_ENCABEZADOS = [
+        'Cédula Escolar',
+        'Tipo Documento', 'N° de Documento',
+        'Nombre Completo', 'Fecha Nacimiento', 'Género',
+        'Grado', 'Sección', 'Estado de Inscripción', 'Grupo Sanguíneo',
+        'Carnet Patria Código', 'Carnet Patria Serial',
+        'N° Cuenta', 'Tipo Cuenta', 'Banco',
+        'Calle', 'Ciudad', 'Estado', 'Referencia',
+        'Representante', 'Tipo Doc. Rep.', 'N° Doc. Rep.', 'Teléfono Rep.',
+        'Profesor Encargado',
+    ]
+
+    # Subconjunto de columnas que se muestran en el PDF (datos principales).
+    # El PDF con las 25 columnas resulta ilegible; aquí van las más relevantes.
+    ALUMNOS_PDF_COLUMNAS = [
+        'Cédula Escolar', 'Tipo Documento', 'N° de Documento', 'Nombre Completo',
+        'Fecha Nacimiento', 'Género', 'Grado', 'Sección',
+        'Estado de Inscripción', 'Representante', 'Teléfono Rep.', 'Profesor Encargado',
+    ]
+
+    @classmethod
+    def _fila_alumno_pdf(cls, alumno):
+        """Fila reducida (solo ALUMNOS_PDF_COLUMNAS) a partir de la fila completa."""
+        fila = cls._fila_alumno(alumno)
+        idx = [cls.ALUMNOS_EXPORT_ENCABEZADOS.index(c) for c in cls.ALUMNOS_PDF_COLUMNAS]
+        return [fila[i] for i in idx]
+
+    @classmethod
+    def _fila_alumno(cls, alumno):
+        """Construye una fila con el orden de ALUMNOS_EXPORT_ENCABEZADOS."""
+        nombre_completo = ' '.join(filter(None, [
+            alumno.primer_nombre or '',
+            alumno.segundo_nombre or '',
+            alumno.primer_apellido or '',
+            alumno.segundo_apellido or ''
+        ])).strip() or 'N/D'
+
+        grado_nom, seccion_nom, estado_insc = cls._datos_academicos_alumno(alumno)
+
+        direccion = alumno.id_direccion_residencia if hasattr(alumno, 'id_direccion_residencia') else None
+        calle = direccion.calle if direccion and hasattr(direccion, 'calle') else ''
+        ciudad = direccion.ciudad if direccion and hasattr(direccion, 'ciudad') else ''
+        estado_ref = direccion.estado if direccion and hasattr(direccion, 'estado') else ''
+        referencia = direccion.referencia if direccion and hasattr(direccion, 'referencia') else ''
+
+        repre = cls._primera_relacion(alumno, 'representantes_vinculados')
+        # representantes_vinculados devuelve el pivote AlumnoRepresentante; el
+        # representante real (con nombres, cédula y teléfono) está en .representante.
+        repre_real = getattr(repre, 'representante', None) if repre else None
+        representante_nom = 'N/D'
+        repre_tipo_doc = 'N/D'
+        repre_num_doc = 'N/D'
+        repre_telefono = 'N/D'
+        if repre_real:
+            representante_nom = ' '.join(filter(None, [
+                getattr(repre_real, 'primer_nombre', ''), getattr(repre_real, 'segundo_nombre', ''),
+                getattr(repre_real, 'primer_apellido', ''), getattr(repre_real, 'segundo_apellido', '')
+            ])).strip() or 'N/D'
+            repre_tipo_doc, repre_num_doc = _separar_documento(getattr(repre_real, 'cedula', None))
+            repre_telefono = getattr(repre_real, 'telefono_principal', None) or 'N/D'
+
+        fecha_nac = getattr(alumno, 'fecha_nacimiento', None)
+        fecha_nac_str = fecha_nac.strftime('%d/%m/%Y') if hasattr(fecha_nac, 'strftime') else str(fecha_nac or 'N/D')
+
+        return [
+            alumno.cedula_escolar or 'N/D',
+            alumno.tipo_documento_identidad or 'N/D',
+            alumno.numero_documento_identidad or 'N/D',
+            nombre_completo,
+            fecha_nac_str,
+            alumno.genero or 'N/D',
+            grado_nom,
+            seccion_nom,
+            estado_insc,
+            alumno.grupo_sanguineo or 'N/D',
+            alumno.carnet_patria_codigo or 'N/D',
+            alumno.carnet_patria_serial or 'N/D',
+            alumno.numero_cuenta or 'N/D',
+            alumno.tipo_cuenta or 'N/D',
+            alumno.banco or 'N/D',
+            calle or 'N/D',
+            ciudad or 'N/D',
+            estado_ref or 'N/D',
+            referencia or 'N/D',
+            representante_nom or 'N/D',
+            repre_tipo_doc,
+            repre_num_doc,
+            repre_telefono,
+            cls._obtener_nombre_y_apellido(alumno.id_profesor_encargado) if getattr(alumno, 'id_profesor_encargado', None) else 'N/D',
+        ]
+
+    def get_queryset(self):
+        """Listado base de alumnos con filtros opcionales por grado y sección."""
+        qs = super().get_queryset()
+
+        # Filtros manuales (django-filter no está instalado en el proyecto)
+        grado_id = self.request.query_params.get('grado')
+        seccion_id = self.request.query_params.get('seccion')
+        estado = self.request.query_params.get('estado')
+
+        if grado_id or seccion_id or estado:
+            # Construcción del filtrado a través de Inscripciones y GruposAcademicos
+            try:
+                inscripciones = Inscripciones.objects.all()
+                if grado_id:
+                    # Acepta ID numérico (backend real) o nombre de grado (fallback offline del frontend)
+                    if str(grado_id).isdigit():
+                        inscripciones = inscripciones.filter(grupo__grado_id=int(grado_id))
+                    else:
+                        inscripciones = inscripciones.filter(grupo__grado__nombre_grado=str(grado_id))
+                if seccion_id:
+                    if str(seccion_id).isdigit():
+                        inscripciones = inscripciones.filter(grupo__seccion_id=int(seccion_id))
+                    else:
+                        inscripciones = inscripciones.filter(grupo__seccion__nombre_seccion=str(seccion_id))
+                if estado:
+                    inscripciones = inscripciones.filter(estado_inscripcion=estado)
+                alumno_ids = list(inscripciones.values_list('alumno_id', flat=True).distinct())
+            except (ValueError, TypeError, OverflowError):
+                # Valores inválidos → devolver todos los alumnos
+                alumno_ids = []
+
+            if alumno_ids:
+                qs = qs.filter(id_alumno__in=alumno_ids)
+
+        # Optimizamos las relaciones necesarias para serialización y display.
+        # OJO: 'representantes_vinculados' es una relación inversa (1:N); NO puede ir
+        # en select_related porque el JOIN multiplica filas (alumnos duplicados en la lista).
+        # Se maneja con prefetch_related en el queryset base del ViewSet.
+        qs = qs.select_related('id_direccion_residencia')
+
+        return qs
+
+    @staticmethod
+    def _datos_academicos_alumno(alumno):
+        """(Grado, Sección, Estado de inscripción) del alumno.
+
+        El modelo Alumnos NO tiene FK directa de grado/sección: se resuelven
+        a través de su inscripción activa (o la primera disponible).
+        """
+        try:
+            inscripcion = (
+                alumno.inscripciones.filter(estado_inscripcion='Activa').first()
+                or alumno.inscripciones.first()
+            )
+        except Exception:
+            inscripcion = None
+        if not inscripcion or not inscripcion.grupo:
+            return 'N/D', 'N/D', 'N/D'
+        grupo = inscripcion.grupo
+        return (
+            grupo.grado.nombre_grado if grupo.grado_id else 'N/D',
+            grupo.seccion.nombre_seccion if grupo.seccion_id else 'N/D',
+            inscripcion.estado_inscripcion or 'N/D',
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Eliminación en cascada: inscripciones -> calificaciones, asistencias y
+        vínculos con representantes (alineado con las FKs legacy CASCADE).
+        Si la BD lo impide, responde 409 con mensaje claro en vez de 500 con HTML.
+        """
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except (ProtectedError, IntegrityError) as exc:
+            logger.warning('No se pudo eliminar el alumno pk=%s: %s', kwargs.get('pk'), exc)
+            return Response(
+                {'detail': 'No se puede eliminar: el alumno tiene inscripciones o registros asociados.'},
+                status=status.HTTP_409_CONFLICT,
+            )
 
     @swagger_auto_schema(
         operation_description='Obtener historial de inscripciones de un alumno',
@@ -93,6 +273,266 @@ class AlumnosViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
+    @swagger_auto_schema(
+        method='GET',
+        operation_description='Exportar alumnos en formato Excel (.xlsx), respetando los filtros grado/seccion',
+        tags=['Exportaciones Alumnos'],
+        manual_parameters=[
+            openapi.Parameter('grado', openapi.IN_QUERY, description='ID del grado (opcional)', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('seccion', openapi.IN_QUERY, description='ID de la sección (opcional)', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('estado', openapi.IN_QUERY, description='Estado de inscripción (opcional)', type=openapi.TYPE_STRING),
+        ],
+        responses={200: openapi.Response('Archivo Excel'), 400: openapi.Response('Solicitud inválida')}
+    )
+
+    @action(detail=False, methods=['get'], url_path='exportar-alumnos-excel')
+    def exportar_alumnos_excel(self, request):
+        """Exportar a Excel los alumnos filtrados por grado/seccion/estado."""
+        grado_id = request.query_params.get('grado')
+        seccion_id = request.query_params.get('seccion')
+        estado = request.query_params.get('estado')
+
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Alumnos"
+
+        fuente_cabecera = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        relleno_azul = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+
+        ws.append(self.ALUMNOS_EXPORT_ENCABEZADOS)
+
+        for col_num in range(1, len(self.ALUMNOS_EXPORT_ENCABEZADOS) + 1):
+            celda = ws.cell(row=1, column=col_num)
+            celda.font = fuente_cabecera
+            celda.fill = relleno_azul
+
+        for alumno in qs:
+            ws.append(self._fila_alumno(alumno))
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 14)
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="alumnos.xlsx"'
+        wb.save(response)
+        return response
+
+    @swagger_auto_schema(
+        method='GET',
+        operation_description='Exportar alumnos en formato PDF, respetando los filtros grado/seccion/estado',
+        tags=['Exportaciones Alumnos'],
+        manual_parameters=[
+            openapi.Parameter('grado', openapi.IN_QUERY, description='ID del grado (opcional)', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('seccion', openapi.IN_QUERY, description='ID de la sección (opcional)', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('estado', openapi.IN_QUERY, description='Estado de inscripción (opcional)', type=openapi.TYPE_STRING),
+        ],
+        responses={200: openapi.Response('Archivo PDF'), 400: openapi.Response('Solicitud inválida')}
+    )
+    @action(detail=False, methods=['get'], url_path='exportar-alumnos-pdf')
+    def exportar_alumnos_pdf(self, request):
+        """Exportar a PDF los alumnos filtrados por grado/seccion/estado."""
+        grado_id = request.query_params.get('grado')
+        seccion_id = request.query_params.get('seccion')
+        estado = request.query_params.get('estado')
+
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="alumnos.pdf"'
+
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+
+        doc = SimpleDocTemplate(
+            response, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+        )
+        story = []
+
+        styles = getSampleStyleSheet()
+        estilo_titulo = ParagraphStyle(
+            'TituloAlumnos',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=18,
+            leading=22,
+            textColor=colors.HexColor('#1F4E78'),
+            alignment=1
+        )
+        estilo_subtitulo = ParagraphStyle(
+            'SubtituloAlumnos',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            leading=16,
+            textColor=colors.HexColor('#2C5282'),
+            spaceAfter=6
+        )
+
+        story.append(Paragraph("PLATAFORMA ESCOLAR - CONTROL DE INSCRIPCIONES", estilo_titulo))
+        story.append(Spacer(1, 20))
+
+        filas_filtro = []
+        if grado_id:
+            nombre_grado_f = None
+            if str(grado_id).isdigit():
+                nombre_grado_f = GradosAcademicos.objects.filter(
+                    pk=grado_id
+                ).values_list('nombre_grado', flat=True).first()
+            filas_filtro.append(('Grado:', nombre_grado_f or str(grado_id)))
+        if seccion_id:
+            nombre_seccion_f = None
+            if str(seccion_id).isdigit():
+                nombre_seccion_f = Secciones.objects.filter(
+                    pk=seccion_id
+                ).values_list('nombre_seccion', flat=True).first()
+            filas_filtro.append(('Sección:', nombre_seccion_f or str(seccion_id)))
+        if estado:
+            filas_filtro.append(('Estado:', estado))
+        if filas_filtro:
+            story.append(Paragraph("FILTROS APLICADOS", estilo_subtitulo))
+            story.append(_tabla_clave_valor(filas_filtro, styles))
+            story.append(Spacer(1, 12))
+
+        # PDF solo con datos principales (ALUMNOS_PDF_COLUMNAS) para que sea legible.
+        # Portrait letter: 612 - 80 márgenes = 532pt útiles; los pesos se escalan
+        # a ese ancho para que la tabla no se desborde.
+        encabezados = self.ALUMNOS_PDF_COLUMNAS
+        ancho_util = letter[0] - 80
+        pesos = [55, 35, 50, 100, 45, 32, 50, 30, 45, 100, 42, 90]
+        total_peso = sum(pesos)
+        col_widths = [round(p * ancho_util / total_peso) for p in pesos]
+        estilo_cab = ParagraphStyle(
+            'PdfAluCab', parent=styles['Normal'], fontName='Helvetica-Bold',
+            fontSize=7, leading=9, textColor=colors.white, alignment=1
+        )
+        estilo_celda = ParagraphStyle(
+            'PdfAluCelda', parent=styles['Normal'], fontName='Helvetica',
+            fontSize=7, leading=9
+        )
+
+        datos_tabla = [[Paragraph(escape(h), estilo_cab) for h in encabezados]]
+        for alumno in qs:
+            datos_tabla.append([
+                Paragraph(_texto_seguro(valor, 'N/D'), estilo_celda)
+                for valor in self._fila_alumno_pdf(alumno)
+            ])
+
+        tabla_pdf = Table(
+            datos_tabla,
+            colWidths=col_widths,
+            repeatRows=1
+        )
+        tabla_pdf.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E78')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, 0), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ]))
+
+        story.append(tabla_pdf)
+        doc.build(story)
+        return response
+
+    @action(detail=False, methods=['get'], url_path='exportar-alumnos-csv')
+    def exportar_alumnos_csv(self, request):
+        """Exportar a CSV los alumnos filtrados por grado/seccion/estado (get_queryset)."""
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="alumnos.csv"'
+        response.write('\ufeff')  # BOM UTF-8 para que Excel lo abra con acentos correctos
+
+        writer = csv.writer(response)
+        writer.writerow(self.ALUMNOS_EXPORT_ENCABEZADOS)
+
+        for alumno in qs:
+            writer.writerow(self._fila_alumno(alumno))
+
+        return response
+
+
+    @staticmethod
+    def _primera_relacion(objeto, relacion):
+        """Devuelve la primera instancia de una relación ManyRelatedManager, o None."""
+        relacionador = getattr(objeto, relacion, None)
+        if relacionador is None:
+            return None
+        try:
+            return next(iter(relacionador.all()), None)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _obtener_nombre_y_apellido(objeto):
+        """Devuelve 'Nombre Apellido' u 'N/D' si el objeto no tiene nombre/apellido."""
+        if objeto is None:
+            return 'N/D'
+        nombre = ' '.join(filter(None, [
+            getattr(objeto, 'primer_nombre', ''),
+            getattr(objeto, 'segundo_nombre', ''),
+            getattr(objeto, 'primer_apellido', ''),
+            getattr(objeto, 'segundo_apellido', '')
+        ])).strip()
+        return nombre if nombre else 'N/D'
+
+    @swagger_auto_schema(
+        method='GET',
+        operation_description='Listar grados académicos',
+        tags=['Grados'],
+        responses={200: openapi.Response('Lista de grados')}
+    )
+    @action(detail=False, methods=['get'], url_path='grados')
+    def list_grados(self, request):
+        """Obtener la lista de grados disponibles."""
+        qs = GradosAcademicos.objects.all()
+        serializer = GradosAcademicosSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        method='GET',
+        operation_description='Listar secciones',
+        tags=['Secciones'],
+        responses={200: openapi.Response('Lista de secciones')}
+    )
+    @action(detail=False, methods=['get'], url_path='secciones')
+    def list_secciones(self, request):
+        """Obtener la lista de secciones disponibles."""
+        qs = Secciones.objects.all()
+        serializer = SeccionesSerializer(qs, many=True)
+        return Response(serializer.data)
+
+
 @swagger_auto_schema(tags=['Grupos Académicos'])
 class GruposAcademicosViewSet(viewsets.ModelViewSet):
     queryset = GruposAcademicos.objects.select_related('periodo', 'grado', 'seccion', 'turno', 'profesor_director')
@@ -119,11 +559,303 @@ class GruposAcademicosViewSet(viewsets.ModelViewSet):
 
 @swagger_auto_schema(tags=['Inscripciones'])
 class InscripcionesViewSet(viewsets.ModelViewSet):
-    queryset = Inscripciones.objects.select_related('alumno', 'grupo', 'grupo__periodo')
+    queryset = Inscripciones.objects.select_related(
+        'alumno', 'grupo', 'grupo__periodo', 'grupo__grado', 'grupo__seccion', 'grupo__turno'
+    )
     serializer_class = InscripcionesSerializer
     permission_classes = [EsProfesorOAdmin]
     filterset_fields = ['estado_inscripcion', 'alumno', 'grupo']
     search_fields = ['alumno__primer_nombre', 'alumno__primer_apellido', 'alumno__cedula_escolar']
+
+    # Cabeceras comunes de las exportaciones (Excel/PDF/CSV).
+    EXPORT_ENCABEZADOS = [
+        'Alumno', 'Tipo Documento', 'N° de Documento', 'Género', 'Fecha Nacimiento',
+        'Grado', 'Sección', 'Turno', 'Docente Encargado',
+        'Fecha Inscripción', 'Estado', 'Monto', 'Referencia Bancaria',
+        'Dirección', 'Ciudad/Estado',
+        'Representante', 'Tipo Doc. Rep.', 'N° Doc. Rep.', 'Teléfono Rep.',
+        'Carnet Patria Código', 'Carnet Patria Serial',
+        'N° Cuenta', 'Tipo Cuenta', 'Banco'
+    ]
+
+    # Subconjunto de columnas que se muestran en el PDF (datos principales).
+    PDF_COLUMNAS = [
+        'Alumno', 'Tipo Documento', 'N° de Documento',
+        'Grado', 'Sección', 'Turno', 'Docente Encargado',
+        'Fecha Inscripción', 'Estado', 'Monto', 'Referencia Bancaria',
+        'Representante', 'Teléfono Rep.',
+    ]
+
+    @classmethod
+    def _fila_inscripcion_pdf(cls, inscripcion):
+        """Fila reducida (solo PDF_COLUMNAS) a partir de la fila completa."""
+        fila = cls._fila_inscripcion(inscripcion)
+        idx = [cls.EXPORT_ENCABEZADOS.index(c) for c in cls.PDF_COLUMNAS]
+        return [fila[i] for i in idx]
+
+    def get_queryset(self):
+        """Filtrado manual (django-filter NO está disponible en el proyecto):
+        GET /api/academico/inscripciones/?grado=<id|nombre>&seccion=<id|nombre>
+                                &estado_inscripcion=<estado>&search=<texto>
+        Valores vacíos = "Todos" (sin filtro)."""
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        grado = (params.get('grado') or '').strip()
+        if grado:
+            if grado.isdigit():
+                qs = qs.filter(grupo__grado_id=int(grado))
+            else:
+                qs = qs.filter(grupo__grado__nombre_grado=grado)
+
+        seccion = (params.get('seccion') or '').strip()
+        if seccion:
+            if seccion.isdigit():
+                qs = qs.filter(grupo__seccion_id=int(seccion))
+            else:
+                qs = qs.filter(grupo__seccion__nombre_seccion=seccion)
+
+        estado = (params.get('estado_inscripcion') or '').strip()
+        if estado:
+            qs = qs.filter(estado_inscripcion=estado)
+
+        search = (params.get('search') or '').strip()
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(alumno__primer_nombre__icontains=search)
+                | Q(alumno__primer_apellido__icontains=search)
+                | Q(alumno__cedula_escolar__icontains=search)
+                | Q(alumno__numero_documento_identidad__icontains=search)
+            )
+
+        return qs
+
+    @staticmethod
+    def _obtener_nombre_y_apellido(objeto):
+        """Devuelve 'Nombre Apellido' u 'N/D' si el objeto no tiene nombre/apellido."""
+        if objeto is None:
+            return 'N/D'
+        nombre = ' '.join(filter(None, [
+            getattr(objeto, 'primer_nombre', ''),
+            getattr(objeto, 'segundo_nombre', ''),
+            getattr(objeto, 'primer_apellido', ''),
+            getattr(objeto, 'segundo_apellido', '')
+        ])).strip()
+        return nombre if nombre else 'N/D'
+
+    @staticmethod
+    def _fila_inscripcion(inscripcion):
+        """Fila común para Excel/PDF/CSV de una inscripción."""
+        alumno = inscripcion.alumno
+        grupo = inscripcion.grupo
+        fecha = getattr(inscripcion, 'fecha_inscripcion', None)
+        # Fecha legible dd/mm/aaaa (viene como datetime con zona horaria de la BD legacy).
+        fecha_txt = fecha.strftime('%d/%m/%Y') if hasattr(fecha, 'strftime') else str(fecha or 'N/D')
+
+        direccion = alumno.id_direccion_residencia if hasattr(alumno, 'id_direccion_residencia') else None
+        calle = direccion.calle if direccion and hasattr(direccion, 'calle') else ''
+        ciudad = direccion.ciudad if direccion and hasattr(direccion, 'ciudad') else ''
+        estado_ref = direccion.estado if direccion and hasattr(direccion, 'estado') else ''
+        referencia = direccion.referencia if direccion and hasattr(direccion, 'referencia') else ''
+
+        pivote = alumno.representantes_vinculados.first() if hasattr(alumno, 'representantes_vinculados') else None
+        # El pivote AlumnoRepresentante referencia al representante real en .representante.
+        repre = getattr(pivote, 'representante', None) if pivote else None
+        representante_nom = 'N/D'
+        repre_tipo_doc = 'N/D'
+        repre_num_doc = 'N/D'
+        repre_telefono = 'N/D'
+        if repre:
+            representante_nom = ' '.join(filter(None, [
+                getattr(repre, 'primer_nombre', ''), getattr(repre, 'segundo_nombre', ''),
+                getattr(repre, 'primer_apellido', ''), getattr(repre, 'segundo_apellido', '')
+            ])).strip() or 'N/D'
+            repre_tipo_doc, repre_num_doc = _separar_documento(getattr(repre, 'cedula', None))
+            repre_telefono = getattr(repre, 'telefono_principal', None) or 'N/D'
+
+        fecha_nac = getattr(alumno, 'fecha_nacimiento', None)
+        fecha_nac_str = fecha_nac.strftime('%d/%m/%Y') if hasattr(fecha_nac, 'strftime') else str(fecha_nac or 'N/D')
+
+        return [
+            ' '.join(filter(None, [
+                getattr(alumno, 'primer_nombre', ''), getattr(alumno, 'segundo_nombre', ''),
+                getattr(alumno, 'primer_apellido', ''), getattr(alumno, 'segundo_apellido', ''),
+            ])).strip() or 'N/D',
+            alumno.tipo_documento_identidad or 'N/D',
+            alumno.numero_documento_identidad or alumno.cedula_escolar or 'N/D',
+            alumno.genero or 'N/D',
+            fecha_nac_str,
+            grupo.grado.nombre_grado if grupo and grupo.grado_id else 'N/D',
+            grupo.seccion.nombre_seccion if grupo and grupo.seccion_id else 'N/D',
+            grupo.turno.nombre_turno if grupo and grupo.turno_id else 'N/D',
+            InscripcionesViewSet._obtener_nombre_y_apellido(getattr(alumno, 'id_profesor_encargado', None))
+            if hasattr(alumno, 'id_profesor_encargado') else 'N/D',
+            fecha_txt,
+            getattr(inscripcion, 'estado_inscripcion', '') or 'N/D',
+            f"{float(getattr(inscripcion, 'monto_pago', None) or 0):.2f}",
+            getattr(inscripcion, 'referencia_bancaria', None) or 'N/D',
+            calle or 'N/D',
+            f"{ciudad} {estado_ref}".strip() or 'N/D',
+            representante_nom or 'N/D',
+            repre_tipo_doc,
+            repre_num_doc,
+            repre_telefono,
+            alumno.carnet_patria_codigo or 'N/D',
+            alumno.carnet_patria_serial or 'N/D',
+            alumno.numero_cuenta or 'N/D',
+            alumno.tipo_cuenta or 'N/D',
+            alumno.banco or 'N/D',
+        ]
+
+    @action(detail=False, methods=['get'], url_path='exportar-inscripciones-excel')
+    def exportar_inscripciones_excel(self, request):
+        """Exportar a Excel las inscripciones filtradas (grado/seccion/estado/search)."""
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay inscripciones que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Inscripciones"
+
+        fuente_cabecera = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        relleno_azul = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+
+        ws.append(self.EXPORT_ENCABEZADOS)
+        for col_num in range(1, len(self.EXPORT_ENCABEZADOS) + 1):
+            celda = ws.cell(row=1, column=col_num)
+            celda.font = fuente_cabecera
+            celda.fill = relleno_azul
+
+        for inscripcion in qs:
+            ws.append(self._fila_inscripcion(inscripcion))
+
+        for col in ws.columns:
+            max_len = max(len(str(celda.value or '')) for celda in col)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 45)
+
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="inscripciones.xlsx"'
+        wb.save(response)
+        return response
+
+    @action(detail=False, methods=['get'], url_path='exportar-inscripciones-pdf')
+    def exportar_inscripciones_pdf(self, request):
+        """Exportar a PDF las inscripciones filtradas (grado/seccion/estado/search)."""
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay inscripciones que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="inscripciones.pdf"'
+
+        doc = SimpleDocTemplate(
+            response, pagesize=landscape(letter), rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+        )
+        story = []
+        styles = getSampleStyleSheet()
+
+        estilo_titulo = ParagraphStyle(
+            'TituloInscripciones', parent=styles['Heading1'], fontName='Helvetica-Bold',
+            fontSize=18, leading=22, textColor=colors.HexColor('#1F4E78'), alignment=1
+        )
+        estilo_subtitulo = ParagraphStyle(
+            'SubtituloInscripciones', parent=styles['Heading2'], fontName='Helvetica-Bold',
+            fontSize=12, leading=16, textColor=colors.HexColor('#2C5282'), spaceAfter=6
+        )
+
+        story.append(Paragraph("PLATAFORMA ESCOLAR - INSCRIPCIONES", estilo_titulo))
+        story.append(Spacer(1, 20))
+
+        filas_filtro = []
+        for etiqueta, param in (
+            ('Grado:', 'grado'), ('Sección:', 'seccion'),
+            ('Estado:', 'estado_inscripcion'), ('Búsqueda:', 'search'),
+        ):
+            valor = (request.query_params.get(param) or '').strip()
+            if valor:
+                filas_filtro.append((etiqueta, valor))
+        if filas_filtro:
+            story.append(Paragraph("FILTROS APLICADOS", estilo_subtitulo))
+            story.append(_tabla_clave_valor(filas_filtro, styles))
+            story.append(Spacer(1, 12))
+
+        # PDF solo con datos principales (PDF_COLUMNAS) para que sea legible.
+        # Landscape letter: 792 - 80 = 712pt útiles; los pesos se escalan a ese
+        # ancho para que la tabla no se desborde.
+        estilo_cab = ParagraphStyle(
+            'PdfInsCab', parent=styles['Normal'], fontName='Helvetica-Bold',
+            fontSize=7.5, leading=9, textColor=colors.white, alignment=1
+        )
+        estilo_celda = ParagraphStyle(
+            'PdfInsCelda', parent=styles['Normal'], fontName='Helvetica',
+            fontSize=7.5, leading=9
+        )
+
+        datos_tabla = [[Paragraph(escape(h), estilo_cab) for h in self.PDF_COLUMNAS]]
+        for inscripcion in qs:
+            datos_tabla.append([
+                Paragraph(_texto_seguro(valor, 'N/D'), estilo_celda)
+                for valor in self._fila_inscripcion_pdf(inscripcion)
+            ])
+
+        ancho_util = landscape(letter)[0] - 80
+        pesos = [110, 38, 55, 55, 32, 42, 100, 48, 45, 42, 60, 100, 45]
+        total_peso = sum(pesos)
+        col_widths = [round(p * ancho_util / total_peso) for p in pesos]
+
+        tabla_pdf = Table(
+            datos_tabla,
+            colWidths=col_widths,
+            repeatRows=1
+        )
+        tabla_pdf.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E78')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, 0), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F9FAFB')]),
+        ]))
+        story.append(tabla_pdf)
+        doc.build(story)
+        return response
+
+    @action(detail=False, methods=['get'], url_path='exportar-inscripciones-csv')
+    def exportar_inscripciones_csv(self, request):
+        """Exportar a CSV las inscripciones filtradas (grado/seccion/estado/search)."""
+        qs = self.get_queryset()
+
+        if not qs.exists():
+            return Response(
+                {'error': 'No hay inscripciones que coincidan con los filtros especificados'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="inscripciones.csv"'
+        response.write('\ufeff')  # BOM UTF-8 para que Excel lo abra con acentos correctos
+
+        writer = csv.writer(response)
+        writer.writerow(self.EXPORT_ENCABEZADOS)
+        for inscripcion in qs:
+            writer.writerow(self._fila_inscripcion(inscripcion))
+
+        return response
 
 
 @swagger_auto_schema(tags=['Calificaciones'])
@@ -541,6 +1273,24 @@ def _crear_estilos_comprobante():
     }
 
 
+def _separar_documento(valor):
+    """Separa un documento tipo 'V-8765432' en (tipo, número) = ('V', '8765432').
+
+    Acepta formatos con guion, espacio o solo concatenado. Si no hay prefijo
+    alfabético reconocible, devuelve ('N/D', número) para no perder el valor.
+    """
+    if valor is None or str(valor).strip() == '':
+        return 'N/D', 'N/D'
+    texto = str(valor).strip()
+    # Separa en letras iniciales (tipo) y resto (número): 'V-123', 'E 123', '123'.
+    match = re.match(r'^\s*([A-Za-z]{1,3})?[\s\-]*([0-9].*?)\s*$', texto)
+    if match and match.group(1) and match.group(2):
+        return match.group(1).upper(), match.group(2)
+    if match and match.group(2):
+        return 'N/D', match.group(2)
+    return 'N/D', texto
+
+
 def _texto_seguro(valor, defecto='N/A'):
     """Convierte un valor a texto escapado para usarlo dentro de un Paragraph de ReportLab."""
     if valor is None or valor == '':
@@ -554,8 +1304,22 @@ def _tabla_clave_valor(filas, estilos):
     Los valores se envuelven en Paragraph para que los textos largos se ajusten a la celda;
     se escapan porque provienen de datos externos (webhook de Google Forms).
     """
+    # Compatibilidad: getSampleStyleSheet() no trae las claves 'label'/'normal'
+    # que espera esta tabla; se derivan automáticamente en ese caso (los
+    # exportadores de PDF pasan la hoja estándar de ReportLab).
+    try:
+        etiqueta_estilo = estilos['label']
+        valor_estilo = estilos['normal']
+    except (KeyError, TypeError):
+        etiqueta_estilo = ParagraphStyle(
+            'FiltroLabel', parent=estilos['Normal'],
+            fontName='Helvetica-Bold', fontSize=9, leading=11,
+            textColor=colors.HexColor('#4A5568'),
+        )
+        valor_estilo = ParagraphStyle('FiltroNormal', parent=estilos['Normal'], fontSize=9, leading=11)
+
     datos = [
-        [Paragraph(escape(etiqueta), estilos['label']), Paragraph(valor, estilos['normal'])]
+        [Paragraph(escape(str(etiqueta)), etiqueta_estilo), Paragraph(escape(str(valor)), valor_estilo)]
         for etiqueta, valor in filas
     ]
     tabla = Table(datos, colWidths=[150, 362])

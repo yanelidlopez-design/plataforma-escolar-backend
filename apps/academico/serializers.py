@@ -1,7 +1,9 @@
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
+from apps.core.models import Direcciones
 from apps.personal.serializers import ProfesoresSerializer
 from apps.personal.models import RepresentantesLegales, AlumnoRepresentante
 
@@ -21,6 +23,17 @@ class RepresentanteAnidadoSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
 
 
+class DireccionAnidadaSerializer(serializers.Serializer):
+    """
+    Dirección de residencia del alumno anidada en el payload del alumno.
+    Se persiste en core.Direcciones y se vincula vía alumnos.id_direccion_residencia.
+    """
+    calle = serializers.CharField(max_length=255, required=True)
+    ciudad = serializers.CharField(max_length=100, required=True)
+    estado = serializers.CharField(max_length=100, required=True)
+    referencia = serializers.CharField(required=False, allow_null=True, allow_blank=True, default='')
+
+
 class AlumnosSerializer(serializers.ModelSerializer):
     direccion_detalle = DireccionesSerializer(source='id_direccion_residencia', read_only=True)
     representante = RepresentanteAnidadoSerializer(required=False, allow_null=True)
@@ -28,10 +41,85 @@ class AlumnosSerializer(serializers.ModelSerializer):
         required=False, allow_null=True, allow_blank=True, max_length=50,
         help_text='Parentesco del representante con el alumno (requiere "representante").'
     )
+    direccion = DireccionAnidadaSerializer(
+        required=False, allow_null=True,
+        help_text='Dirección de residencia del alumno (se crea/actualiza en core.Direcciones).'
+    )
+    # Grupo académico: se asigna vía inscripción activa (create/update de la inscripción).
+    id_grupo = serializers.IntegerField(
+        required=False, allow_null=True, write_only=True,
+        help_text='ID del grupo académico; crea/actualiza la inscripción activa del alumno.'
+    )
+    grupo_inscripcion_id = serializers.SerializerMethodField()
+    # Campos adicionales para display en la UI (grado/seccion/profesor encargado)
+    grado_actual = serializers.SerializerMethodField()
+    seccion_actual = serializers.SerializerMethodField()
+    profesor_encargado = serializers.SerializerMethodField()
 
     class Meta:
         model = Alumnos
         fields = '__all__'
+
+    def to_internal_value(self, data):
+        """
+        Normaliza cédula escolar vacía a NULL antes de las validaciones de campo:
+        la columna es UNIQUE y '' duplicado rechazaría el guardado con 400.
+        """
+        if isinstance(data, dict) and data.get('cedula_escolar') == '':
+            data = {**data, 'cedula_escolar': None}
+        return super().to_internal_value(data)
+
+    def get_grado_actual(self, obj):
+        """Obtiene el nivel actual (grado/seccion) del alumno a través de Inscripciones activas."""
+        try:
+            inscripcion = obj.inscripciones.filter(estado_inscripcion__in=['Activa', 'Graduado']).first()
+            if inscripcion and inscripcion.grupo:
+                return inscripcion.grupo.grado.nombre_grado if hasattr(inscripcion.grupo.grado, 'nombre_grado') else str(inscripcion.grupo.grado)
+        except Exception:
+            pass
+        return None
+
+    def get_seccion_actual(self, obj):
+        """Obtiene la sección actual del alumno a través de Inscripciones activas."""
+        try:
+            inscripcion = obj.inscripciones.filter(estado_inscripcion__in=['Activa', 'Graduado']).first()
+            if inscripcion and inscripcion.grupo:
+                return inscripcion.grupo.seccion.nombre_seccion if hasattr(inscripcion.grupo.seccion, 'nombre_seccion') else str(inscripcion.grupo.seccion)
+        except Exception:
+            pass
+        return None
+
+    def get_profesor_encargado(self, obj):
+        """Profesor encargado (Docente Guía) del alumno.
+        1) Asignación directa: FK id_profesor_encargado en la tabla alumnos.
+        2) Fallback: vía inscripción activa -> grupo -> profesor director.
+        """
+        try:
+            if obj.id_profesor_encargado:
+                return f"{obj.id_profesor_encargado.primer_nombre} {obj.id_profesor_encargado.primer_apellido}".strip()
+        except Exception:
+            pass
+        try:
+            inscripcion = obj.inscripciones.filter(estado_inscripcion__in=['Activa', 'Graduado']).first()
+            if inscripcion and inscripcion.grupo and inscripcion.grupo.profesor_director:
+                profesor = inscripcion.grupo.profesor_director
+                return f"{profesor.primer_nombre} {profesor.primer_apellido}"
+        except Exception:
+            pass
+        return None
+
+    def get_grupo_inscripcion_id(self, obj):
+        """ID del grupo de la inscripción activa del alumno (para precargar el form)."""
+        try:
+            inscripcion = obj.inscripciones.filter(estado_inscripcion='Activa').first()
+            return inscripcion.grupo_id if inscripcion else None
+        except Exception:
+            return None
+
+    def validate_id_grupo(self, value):
+        if value is not None and not GruposAcademicos.objects.filter(pk=value).exists():
+            raise serializers.ValidationError("El grupo indicado no existe.")
+        return value
 
     def validate_peso_kg(self, value):
         if value is not None and (value < 10 or value > 200):
@@ -44,8 +132,14 @@ class AlumnosSerializer(serializers.ModelSerializer):
         return value
 
     def validate_talla_zapato(self, value):
-        if value is not None and (value < 20 or value > 50):
-            raise serializers.ValidationError("La talla de zapato debe estar entre 20 y 50")
+        # El modelo almacena la talla como texto ('32'), por eso llega como str.
+        if value not in (None, ''):
+            try:
+                n = float(value)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("La talla de zapato debe ser un número")
+            if n < 20 or n > 50:
+                raise serializers.ValidationError("La talla de zapato debe estar entre 20 y 50")
         return value
 
     def to_representation(self, instance):
@@ -56,6 +150,17 @@ class AlumnosSerializer(serializers.ModelSerializer):
         """
         data = super().to_representation(instance)
         relacion = instance.representantes_vinculados.first()
+
+        if instance.id_direccion_residencia:
+            dir_obj = instance.id_direccion_residencia
+            data['direccion'] = {
+                'calle': dir_obj.calle,
+                'ciudad': dir_obj.ciudad,
+                'estado': dir_obj.estado,
+                'referencia': dir_obj.referencia or '',
+            }
+        else:
+            data['direccion'] = None
 
         if relacion and relacion.representante:
             rep = relacion.representante
@@ -82,13 +187,22 @@ class AlumnosSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         """
-        Crea el alumno y, de forma atómica, el representante (si no existe por cédula)
-        y la relación pivot AlumnoRepresentante con su parentesco.
+        Crea el alumno y, de forma atómica, la dirección (si viene), el representante
+        (si no existe por cédula) y la relación pivot AlumnoRepresentante.
         """
         representante_data = validated_data.pop('representante', None)
         parentesco = validated_data.pop('parentesco', None)
+        direccion_data = validated_data.pop('direccion', None)
+        id_grupo = validated_data.pop('id_grupo', None)
 
         alumno = Alumnos.objects.create(**validated_data)
+
+        if direccion_data:
+            alumno.id_direccion_residencia = self._vincular_direccion(None, direccion_data)
+            alumno.save()
+
+        if id_grupo:
+            self._vincular_grupo(alumno, id_grupo)
 
         if representante_data:
             self._vincular_representante(alumno, representante_data, parentesco)
@@ -99,10 +213,22 @@ class AlumnosSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         representante_data = validated_data.pop('representante', None)
         parentesco = validated_data.pop('parentesco', None)
+        direccion_data = validated_data.pop('direccion', None)
+        id_grupo = validated_data.pop('id_grupo', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        # Si trae dirección: actualiza la existente o crea y vincula una nueva.
+        if direccion_data:
+            instance.id_direccion_residencia = self._vincular_direccion(
+                instance.id_direccion_residencia, direccion_data
+            )
+
         instance.save()
+
+        if id_grupo:
+            self._vincular_grupo(instance, id_grupo)
 
         if representante_data:
             self._vincular_representante(instance, representante_data, parentesco)
@@ -110,12 +236,51 @@ class AlumnosSerializer(serializers.ModelSerializer):
         return instance
 
     @staticmethod
+    def _vincular_grupo(alumno, id_grupo):
+        """Crea o actualiza la inscripción ACTIVA del alumno con el grupo indicado."""
+        grupo = GruposAcademicos.objects.get(pk=id_grupo)
+        inscripcion = Inscripciones.objects.filter(
+            alumno=alumno, estado_inscripcion='Activa'
+        ).first()
+        if inscripcion:
+            inscripcion.grupo = grupo
+            inscripcion.save()
+        else:
+            Inscripciones.objects.create(
+                alumno=alumno,
+                grupo=grupo,
+                fecha_inscripcion=timezone.now(),
+                estado_inscripcion='Activa',
+            )
+
+    @staticmethod
+    def _vincular_direccion(direccion_existente, direccion_data):
+        """Crea o actualiza la dirección (core.Direcciones) y devuelve la instancia."""
+        campos = {
+            'calle': direccion_data['calle'],
+            'ciudad': direccion_data['ciudad'],
+            'estado': direccion_data['estado'],
+            'referencia': direccion_data.get('referencia') or None,
+        }
+        if direccion_existente:
+            for campo, valor in campos.items():
+                setattr(direccion_existente, campo, valor)
+            direccion_existente.save()
+            return direccion_existente
+        return Direcciones.objects.create(**campos)
+
+    @staticmethod
     def _vincular_representante(alumno, representante_data, parentesco):
         """
         Vincula un alumno con su representante legal:
         - Si la cédula ya existe en representantes_legales, la reutiliza (get_or_create).
         - Si no existe, crea el registro.
-        - Crea/actualiza la fila pivot en alumno_representante (PK compuesta id_alumno).
+        - Crea/actualiza la fila pivot en alumno_representante.
+
+        NOTA: la tabla pivot tiene PK compuesta (id_alumno, id_representante) en la BD,
+        pero el modelo Django declara solo id_alumno como PK; por eso se usan
+        filter().update() / create() con WHERE completo en lugar de update_or_create()
+        o save(), que harían un get()/UPDATE ambiguos con múltiples vínculos.
         """
         # 'nombre' llega completo ("Pedro Perez") y se expande a primer_nombre/primer_apellido
         # porque la tabla legacy exige ambos campos NOT NULL.
@@ -133,16 +298,26 @@ class AlumnosSerializer(serializers.ModelSerializer):
             },
         )
 
-        # update_or_create: la relación usa id_alumno como PK (un solo representante
-        # por alumno en esta tabla pivot), así la operación es idempotente.
-        AlumnoRepresentante.objects.update_or_create(
-            alumno=alumno,
-            defaults={
-                'representante': representante,
-                'parentesco': parentesco or None,
-                'es_principal': True,
-            },
-        )
+        valores = {
+            'parentesco': parentesco or 'Sin especificar',
+            'es_principal': True,
+        }
+
+        # 1) Si ya existe el vínculo (alumno, representante) -> actualizarlo.
+        actualizados = AlumnoRepresentante.objects.filter(
+            alumno=alumno, representante=representante
+        ).update(**valores)
+
+        # 2) Si no existe -> crearlo (create con force_insert, seguro con esta PK).
+        if not actualizados:
+            AlumnoRepresentante.objects.create(
+                alumno=alumno, representante=representante, **valores
+            )
+
+        # 3) Un solo representante principal por alumno (el resto quedan como secundarios).
+        AlumnoRepresentante.objects.filter(alumno=alumno).exclude(
+            representante=representante
+        ).update(es_principal=False)
 
 class GruposAcademicosSerializer(serializers.ModelSerializer):
     periodo_detalle = PeriodosAcademicosSerializer(source='periodo', read_only=True)

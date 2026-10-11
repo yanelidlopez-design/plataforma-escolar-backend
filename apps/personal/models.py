@@ -1,6 +1,24 @@
 from django.db import models
 
 class Profesores(models.Model):
+    """
+    Personal del plantel (renombrado conceptualmente de 'Profesores' a 'Personal').
+
+    La tabla legacy `profesores` no tiene columna `categoria`: el campo se almacena
+    en la columna existente `especialidad` (db_column) para no alterar la BD.
+    """
+    CATEGORIA_CHOICES = [
+        # Valor legacy ya presente en la tabla 'profesores' (debe poder editarse)
+        ('Integral', 'Integral'),
+        ('Profesor', 'Profesor'),
+        ('Obrero', 'Obrero'),
+        ('Cocinera', 'Cocinera'),
+        ('Administrativo', 'Administrativo'),
+        ('Director (Directivo)', 'Director (Directivo)'),
+        ('Sub-Director (Directivo)', 'Sub-Director (Directivo)'),
+        ('Coordinador (Directivo)', 'Coordinador (Directivo)'),
+    ]
+
     id_profesor = models.AutoField(primary_key=True, db_column='id_profesor')
     id_usuario = models.OneToOneField(
         'core.Usuarios',  # Asegúrate de cambiar 'core' por el nombre real de la app donde vive Usuarios si es distinta
@@ -14,16 +32,18 @@ class Profesores(models.Model):
     primer_apellido = models.CharField(max_length=100, db_column='primer_apellido')
     segundo_apellido = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_apellido')
     cedula = models.CharField(max_length=20, unique=True, db_column='cedula')
-    especialidad = models.CharField(max_length=150, blank=True, null=True, db_column='especialidad')
+    telefono = models.CharField(max_length=20, blank=True, null=True, db_column='telefono')
+    # Campo obligatorio (Choice/Enum) — se persiste en la columna legacy 'especialidad'
+    categoria = models.CharField(max_length=150, choices=CATEGORIA_CHOICES, db_column='especialidad')
 
     class Meta:
         managed = False
         db_table = 'profesores'
-        verbose_name = 'Profesor'
-        verbose_name_plural = 'Profesores'
+        verbose_name = 'Personal'
+        verbose_name_plural = 'Personal'
 
     def __str__(self):
-        return f"Prof. {self.primer_nombre} {self.primer_apellido} - C.I. {self.cedula}"
+        return f"{self.primer_nombre} {self.primer_apellido} - {self.categoria}"
 
 
 class RepresentantesLegales(models.Model):

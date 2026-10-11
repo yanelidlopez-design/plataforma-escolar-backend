@@ -16,6 +16,15 @@ class Alumnos(models.Model):
         blank=True,
         null=True
     )
+    # Profesor encargado (Docente Guía) asignado directamente al alumno.
+    id_profesor_encargado = models.ForeignKey(
+        'personal.Profesores',
+        on_delete=models.SET_NULL,
+        db_column='id_profesor_encargado',
+        blank=True,
+        null=True,
+        related_name='alumnos_asignados'
+    )
     primer_nombre = models.CharField(max_length=150, db_column='primer_nombre')
     segundo_nombre = models.CharField(max_length=150, blank=True, null=True, db_column='segundo_nombre')
     primer_apellido = models.CharField(max_length=150, db_column='primer_apellido')
@@ -27,6 +36,11 @@ class Alumnos(models.Model):
     genero = models.CharField(max_length=50, db_column='genero')
     lugar_nacimiento = models.CharField(max_length=255, blank=True, null=True, db_column='lugar_nacimiento')
     nacionalidad = models.CharField(max_length=100, blank=True, null=True, db_column='nacionalidad')
+    carnet_patria_codigo = models.CharField(max_length=50, blank=True, null=True, db_column='carnet_patria_codigo')
+    carnet_patria_serial = models.CharField(max_length=50, blank=True, null=True, db_column='carnet_patria_serial')
+    numero_cuenta = models.CharField(max_length=30, blank=True, null=True, db_column='numero_cuenta')
+    tipo_cuenta = models.CharField(max_length=20, blank=True, null=True, db_column='tipo_cuenta')
+    banco = models.CharField(max_length=100, blank=True, null=True, db_column='banco')
     entidad_federal_nacimiento = models.CharField(max_length=100, blank=True, null=True, db_column='entidad_federal_nacimiento')
     municipio_nacimiento = models.CharField(max_length=100, blank=True, null=True, db_column='municipio_nacimiento')
     parroquia_nacimiento = models.CharField(max_length=100, blank=True, null=True, db_column='parroquia_nacimiento')
@@ -92,7 +106,9 @@ class Inscripciones(models.Model):
     ]
 
     id_inscripcion = models.AutoField(primary_key=True, db_column='id_inscripcion')
-    alumno = models.ForeignKey('Alumnos', on_delete=models.PROTECT, db_column='id_alumno')
+    # CASCADE alineado con la FK legacy fk_inscripcion_id_alumno (DELETE_RULE=CASCADE):
+    # eliminar un alumno borra su historial (inscripciones -> calificaciones, asistencias).
+    alumno = models.ForeignKey('Alumnos', on_delete=models.CASCADE, db_column='id_alumno', related_name='inscripciones')
     grupo = models.ForeignKey(GruposAcademicos, on_delete=models.PROTECT, db_column='id_grupo')
     fecha_inscripcion = models.DateTimeField(blank=True, null=True, db_column='fecha_inscripcion')
     estado_inscripcion = models.CharField(max_length=50, choices=ESTADO_CHOICES, default='Activa', db_column='estado_inscripcion')
