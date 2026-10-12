@@ -15,6 +15,8 @@ pillow==12.3.0
 python-dotenv==1.2.3
 pytz==2026.4
 PyYAML==6.0.3
+pytest==9.1.1
+pytest-django==4.14.0
 reportlab==5.0.1
 sqlparse==0.6.0
 uritemplate==4.2.0

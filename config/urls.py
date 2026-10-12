@@ -25,7 +25,6 @@ urlpatterns = [
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 
     path('admin/', admin.site.urls),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', MiTokenRefreshView.as_view(), name='token_refresh'),
     path('api/core/', include('apps.core.urls')),
     path('api/personal/', include('apps.personal.urls')),

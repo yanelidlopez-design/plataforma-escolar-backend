@@ -20,7 +20,10 @@ DEBUG = env('DEBUG')
 # Si no está definido, el webhook rechaza todas las peticiones con 403.
 WEBHOOK_SECRET_TOKEN = env('WEBHOOK_SECRET_TOKEN', default='')
 
-ALLOWED_HOSTS = ['*']
+# ALLOWED_HOSTS: Lee desde variable de entorno como string separado por comas
+# Ejemplo: ALLOWED_HOSTS=localhost,127.0.0.1,tudominio.com
+allowed_hosts_str = env('ALLOWED_HOSTS', default='')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',') if host.strip()] if allowed_hosts_str else []
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -99,7 +102,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
         # JWT (frontend envía Authorization: Bearer <access>)
@@ -110,7 +113,11 @@ REST_FRAMEWORK = {
     ],
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOWED_ORIGINS: Lee desde variable de entorno como string separado por comas
+# Ejemplo: CORS_ALLOWED_ORIGINS=http://localhost:3000,https://tufrontend.com
+cors_origins_str = env('CORS_ALLOWED_ORIGINS', default='')
+CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_str.split(',') if origin.strip()] if cors_origins_str else []
+CORS_ALLOW_ALL_ORIGINS = False
 
 LANGUAGE_CODE = 'es-es'
 

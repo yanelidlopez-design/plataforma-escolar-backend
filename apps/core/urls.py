@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     DireccionesViewSet, ConfiguracionPlantelViewSet, PeriodosAcademicosViewSet,
     NivelesEducativosViewSet, TurnosViewSet, GradosAcademicosViewSet,
-    SeccionesViewSet, UsuariosViewSet, custom_token_obtain
+    SeccionesViewSet, UsuariosViewSet, custom_token_obtain, custom_token_logout
 )
 
 router = DefaultRouter()
@@ -18,5 +18,6 @@ router.register(r'usuarios', UsuariosViewSet)
 
 urlpatterns = [
     path('token/', custom_token_obtain),
+    path('logout/', custom_token_logout),
     path('', include(router.urls)),
 ]
