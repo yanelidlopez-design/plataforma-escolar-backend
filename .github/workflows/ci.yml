@@ -10,6 +10,17 @@ jobs:
   backend-tests:
     runs-on: ubuntu-latest
 
+    # Variables de entorno simuladas para el runner limpio de GitHub Actions:
+    # no hay archivo .env, y settings.py exige SECRET_KEY (sin default) para
+    # poder importarse. DEBUG='True' la parsea django-environ como bool y
+    # ALLOWED_HOSTS como lista separada por comas. Aplica a todos los steps
+    # del job (manage.py check --deploy y pytest inicializan Django).
+    env:
+      SECRET_KEY: "ci-test-secret-key-super-safe-for-github-actions"
+      DEBUG: "True"
+      ALLOWED_HOSTS: "localhost,127.0.0.1"
+      WEBHOOK_SECRET_TOKEN: "whk-test-token-for-ci"
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
