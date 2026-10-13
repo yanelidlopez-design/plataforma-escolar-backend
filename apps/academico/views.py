@@ -3,7 +3,7 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse
 from django.conf import settings
 from django.utils import timezone
 from django.db.models import ProtectedError, Prefetch
@@ -26,10 +26,23 @@ from .reports import (
 )
 from .services.inscripcion_service import generar_comprobante_inscripcion
 from .services.webhook_service import procesar_alumno_webhook, procesar_inscripcion_webhook
+from .tasks import encolar_exportacion, leer_estado_reporte, ruta_archivo_reporte
 from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones
 from apps.core.serializers import GradosAcademicosSerializer, SeccionesSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _respuesta_reporte_encolado(modulo, formato, queryset):
+    """Encola la generación del reporte en django-q2 y arma la respuesta 202."""
+    reporte_id = encolar_exportacion(modulo, formato, queryset)
+    return {
+        'reporte_id': reporte_id,
+        'estatus': 'Procesando',
+        'url_estado': f'/api/academico/exports/{reporte_id}/',
+        'url_descarga': f'/api/academico/exports/{reporte_id}/descarga/',
+    }
+
 
 @swagger_auto_schema(tags=['Alumnos'])
 class AlumnosViewSet(viewsets.ModelViewSet):
@@ -88,11 +101,11 @@ class AlumnosViewSet(viewsets.ModelViewSet):
         # Optimización N+1: precarga de relaciones para serialización
         # select_related: FK directas (1:1 o N:1)
         # prefetch_related: relaciones inversas o M:N
+        # NOTA: grado/sección NO son FK directas de Alumnos (consolidación de
+        # estudiantes); se resuelven vía Inscripciones -> grupo (prefetch abajo).
         qs = qs.select_related(
             'id_direccion_residencia',
-            'id_profesor_encargado',
-            'grado',
-            'seccion'
+            'id_profesor_encargado'
         ).prefetch_related(
             'representantes_vinculados__representante',  # Para to_representation()
             Prefetch(
@@ -192,7 +205,7 @@ class AlumnosViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-excel')
     def exportar_alumnos_excel(self, request):
-        """Exportar a Excel los alumnos filtrados por grado/seccion/estado."""
+        """Encolar exportación asíncrona a Excel (responde 202 con el reporte_id)."""
         qs = self.get_queryset()
 
         if not qs.exists():
@@ -201,8 +214,10 @@ class AlumnosViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        response = exportar_alumnos_excel(qs)
-        return response
+        return Response(
+            _respuesta_reporte_encolado('alumnos', 'excel', qs),
+            status=status.HTTP_202_ACCEPTED
+        )
 
     @swagger_auto_schema(
         method='GET',
@@ -217,11 +232,7 @@ class AlumnosViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-pdf')
     def exportar_alumnos_pdf(self, request):
-        """Exportar a PDF los alumnos filtrados por grado/seccion/estado."""
-        grado_id = request.query_params.get('grado')
-        seccion_id = request.query_params.get('seccion')
-        estado = request.query_params.get('estado')
-
+        """Encolar exportación asíncrona a PDF (responde 202 con el reporte_id)."""
         qs = self.get_queryset()
 
         if not qs.exists():
@@ -230,8 +241,10 @@ class AlumnosViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        response = exportar_alumnos_pdf(qs, grado_id, seccion_id, estado)
-        return response
+        return Response(
+            _respuesta_reporte_encolado('alumnos', 'pdf', qs),
+            status=status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-csv')
     def exportar_alumnos_csv(self, request):
@@ -296,11 +309,16 @@ class GruposAcademicosViewSet(viewsets.ModelViewSet):
             estado_inscripcion='Activa'
         ).select_related(
             'alumno__id_direccion_residencia',
-            'alumno__id_profesor_encargado',
-            'alumno__grado',
-            'alumno__seccion'
+            'alumno__id_profesor_encargado'
         ).prefetch_related(
-            'alumno__representantes_vinculados__representante'
+            'alumno__representantes_vinculados__representante',
+            # grado/sección del alumno se resuelven vía inscripción (consolidación)
+            Prefetch(
+                'alumno__inscripciones',
+                queryset=Inscripciones.objects.select_related(
+                    'grupo__grado', 'grupo__seccion'
+                ).filter(estado_inscripcion__in=['Activa', 'Graduado'])
+            ),
         )
         alumnos = [registro.alumno for registro in inscripciones]
         serializer = AlumnosSerializer(alumnos, many=True)
@@ -361,13 +379,12 @@ class InscripcionesViewSet(viewsets.ModelViewSet):
             )
 
         # Optimización N+1: precarga de relaciones anidadas para serializadores
-        # alumno_detalle necesita: alumno con direccion, profesor_encargado, grado, seccion
+        # alumno_detalle necesita: alumno con direccion y profesor_encargado
+        # (grado/sección del alumno se resuelven vía inscripción -> grupo)
         # grupo_academico_detalle necesita: grupo con periodo, grado, seccion, turno, profesor_director
         qs = qs.select_related(
             'alumno__id_direccion_residencia',
             'alumno__id_profesor_encargado',
-            'alumno__grado',
-            'alumno__seccion',
             'grupo__periodo',
             'grupo__grado',
             'grupo__seccion',
@@ -383,7 +400,7 @@ class InscripcionesViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='exportar-inscripciones-excel')
     def exportar_inscripciones_excel(self, request):
-        """Exportar a Excel las inscripciones filtradas (grado/seccion/estado/search)."""
+        """Encolar exportación asíncrona a Excel de inscripciones (responde 202)."""
         qs = self.get_queryset()
 
         if not qs.exists():
@@ -392,12 +409,14 @@ class InscripcionesViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        response = exportar_inscripciones_excel(qs)
-        return response
+        return Response(
+            _respuesta_reporte_encolado('inscripciones', 'excel', qs),
+            status=status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=False, methods=['get'], url_path='exportar-inscripciones-pdf')
     def exportar_inscripciones_pdf(self, request):
-        """Exportar a PDF las inscripciones filtradas (grado/seccion/estado/search)."""
+        """Encolar exportación asíncrona a PDF de inscripciones (responde 202)."""
         qs = self.get_queryset()
 
         if not qs.exists():
@@ -406,8 +425,10 @@ class InscripcionesViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        response = exportar_inscripciones_pdf(qs, request.query_params)
-        return response
+        return Response(
+            _respuesta_reporte_encolado('inscripciones', 'pdf', qs),
+            status=status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=False, methods=['get'], url_path='exportar-inscripciones-csv')
     def exportar_inscripciones_csv(self, request):
@@ -820,3 +841,43 @@ def webhook_google_forms(request):
             {'error': 'Error al procesar la solicitud'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+# ============================================================================
+# ENDPOINTS DE CONSULTA/DESCARGA DE REPORTES ASÍNCRONOS (Misión 10)
+# ============================================================================
+
+@api_view(['GET'])
+@permission_classes([EsProfesorOAdmin])
+def estado_exportacion(request, reporte_id):
+    """Estado de un reporte encolado: 'Procesando' | 'Completado' | 'Error'."""
+    reporte = leer_estado_reporte(reporte_id)
+    if reporte is None:
+        return Response({'error': 'Reporte no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(reporte)
+
+
+@api_view(['GET'])
+@permission_classes([EsProfesorOAdmin])
+def descargar_exportacion(request, reporte_id):
+    """Descarga el archivo generado (solo si el reporte está 'Completado')."""
+    reporte = leer_estado_reporte(reporte_id)
+    if reporte is None:
+        return Response({'error': 'Reporte no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+    if reporte.get('estatus') == 'Error':
+        return Response(
+            {'error': 'El reporte falló al generarse', 'detalle': reporte.get('detalle')},
+            status=status.HTTP_409_CONFLICT
+        )
+    ruta = ruta_archivo_reporte(reporte_id, reporte)
+    if ruta is None:
+        return Response(
+            {'error': 'El reporte aún se está procesando'},
+            status=status.HTTP_409_CONFLICT
+        )
+    return FileResponse(
+        open(ruta, 'rb'),
+        as_attachment=True,
+        filename=reporte.get('archivo', 'reporte.bin')
+    )
+

@@ -164,3 +164,52 @@ En la práctica, la reducción observada en los listados de **alumnos** e
   (`pytest.ini` + `apps/academico/tests/`), ejecutados en CI
   (`.github/workflows/ci.yml`).
 
+---
+
+## 5. Exportaciones asíncronas (Misión 10)
+
+Los reportes pesados (Excel/PDF de alumnos e inscripciones) ya no se generan
+dentro del ciclo de la petición HTTP. La generación se delega a **django-q2**
+(broker `orm`, sin dependencias externas) y el cliente consulta el estado:
+
+```
+GET /api/academico/alumnos/exportar-alumnos-excel/   →  202 Accepted
+{
+  "reporte_id": "7123d331…",
+  "estatus": "Procesando",
+  "url_estado": "/api/academico/exports/<id>/",
+  "url_descarga": "/api/academico/exports/<id>/descarga/"
+}
+
+GET /api/academico/exports/<id>/          → 200 { estatus: "Procesando" | "Completado" | "Error", … }
+GET /api/academico/exports/<id>/descarga/ → 200 (archivo binario) | 404 si aún no existe
+```
+
+Componentes:
+
+| Pieza | Responsabilidad |
+|---|---|
+| `apps/academico/tasks.py` | `encolar_exportacion` (registra estado + encola), `ejecutar_exportacion` (worker: genera el archivo con `reports.py`), estado en `MEDIA_ROOT/exports/<id>/estado.json` |
+| `apps/academico/views.py` | `_respuesta_reporte_encolado()` + vistas de estado/descarga (`exports/<id>/`) |
+| `Q_CLUSTER` (settings) | Worker django-q2 con broker `orm` y 2 procesos |
+| Frontend (`src/api/exportaciones.js`) | Solicitud → polling de `url_estado` → descarga del blob |
+
+**Garantías:**
+
+- Los endpoints de **CSV** y los listados siguen siendo síncronos (respuesta
+  inmediata); solo Excel/PDF son asíncronos.
+- El estado se persiste en disco (`estado.json`), por lo que la consulta no
+  depende de la memoria del worker y sobrevive reinicios.
+- `media/exports/` está en `.gitignore`; los binarios son temporales.
+
+**Autenticación (reparada durante la Misión 10):**
+
+- El login real es `POST /api/core/token/` (`custom_token_obtain`), que valida
+  contra `core.Usuarios` y setea la cookie `access_token`.
+- `DEFAULT_AUTHENTICATION_CLASSES` incluye `UsuariosJWTAuthentication`
+  (`apps/core/authentication.py`), que resuelve `user_id` → `core.Usuarios`
+  y acepta **Bearer u HttpOnly cookie**.
+- `POST /api/token/refresh/` usa `MiTokenRefreshSerializer`
+  (`apps/academico/tokens.py`), que valida el refresh contra `core.Usuarios`
+  (no `auth.User`) y devuelve el `access` renovado en el body y en cookie.
+

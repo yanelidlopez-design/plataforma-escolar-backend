@@ -183,17 +183,37 @@ def _separar_documento(valor):
 # STUDENT REPORT GENERATION
 # ============================================================================
 
+def _inscripcion_referencia_alumno(alumno):
+    """Mejor inscripción del alumno (Activa/Graduado) para grado/sección/estado.
+
+    Tras la consolidación de estudiantes, Alumnos ya no tiene FK directas de
+    grado/sección: se resuelven vía Inscripciones -> grupo. Usa la lista
+    prefetcheada si existe (evita N+1 en exportaciones masivas).
+    """
+    inscripcion = _primera_relacion(alumno, 'inscripciones')
+    if inscripcion is not None:
+        return inscripcion
+    try:
+        return alumno.inscripciones.filter(estado_inscripcion__in=['Activa', 'Graduado']).first()
+    except Exception:
+        return None
+
+
 def _fila_alumno(alumno):
     """Genera una fila de datos para exportación de alumnos (Excel/CSV)."""
     direccion = alumno.id_direccion_residencia
-    representante = _primera_relacion(alumno, 'representantes_vinculados')
+    relacion = _primera_relacion(alumno, 'representantes_vinculados')
+    # El pivot devuelve AlumnoRepresentante; la persona es .representante
+    representante = relacion.representante if relacion else None
 
     repre_nombre = _obtener_nombre_y_apellido(representante) if representante else 'N/D'
-    repre_tipo_doc, repre_num_doc = _separar_documento(representante.numero_documento_identidad) if representante else ('', '')
-    repre_telefono = representante.telefono if representante else 'N/D'
+    repre_tipo_doc, repre_num_doc = _separar_documento(representante.cedula) if representante else ('', '')
+    repre_telefono = (representante.telefono_principal or 'N/D') if representante else 'N/D'
 
-    grado_nombre = alumno.grado.nombre_grado if alumno.grado else 'N/D'
-    seccion_nombre = alumno.seccion.nombre_seccion if alumno.seccion else 'N/D'
+    inscripcion = _inscripcion_referencia_alumno(alumno)
+    grupo = inscripcion.grupo if inscripcion else None
+    grado_nombre = grupo.grado.nombre_grado if grupo and grupo.grado else 'N/D'
+    seccion_nombre = grupo.seccion.nombre_seccion if grupo and grupo.seccion else 'N/D'
     profesor_nombre = _obtener_nombre_y_apellido(alumno.id_profesor_encargado) if alumno.id_profesor_encargado else 'N/D'
 
     return [
@@ -223,7 +243,7 @@ def _fila_alumno(alumno):
         alumno.estatus_general or 'N/D',
         grado_nombre,
         seccion_nombre,
-        alumno.estado_inscripcion or 'N/D',
+        inscripcion.estado_inscripcion if inscripcion else 'N/D',
         profesor_nombre,
         f"{direccion.calle}, {direccion.ciudad}, {direccion.estado}" if direccion else 'N/D',
         direccion.ciudad if direccion else 'N/D',
@@ -243,6 +263,8 @@ def _fila_alumno(alumno):
 
 def _fila_alumno_pdf(alumno):
     """Genera una fila de datos simplificada para exportación PDF de alumnos."""
+    inscripcion = _inscripcion_referencia_alumno(alumno)
+    grupo = inscripcion.grupo if inscripcion else None
     return [
         alumno.cedula_escolar or 'N/D',
         alumno.tipo_documento_identidad or 'V',
@@ -258,9 +280,9 @@ def _fila_alumno_pdf(alumno):
         alumno.grupo_sanguineo or 'N/D',
         alumno.peso_kg or 'N/D',
         alumno.talla_cm or 'N/D',
-        alumno.grado.nombre_grado if alumno.grado else 'N/D',
-        alumno.seccion.nombre_seccion if alumno.seccion else 'N/D',
-        alumno.estado_inscripcion or 'N/D',
+        grupo.grado.nombre_grado if grupo and grupo.grado else 'N/D',
+        grupo.seccion.nombre_seccion if grupo and grupo.seccion else 'N/D',
+        inscripcion.estado_inscripcion if inscripcion else 'N/D',
         _obtener_nombre_y_apellido(alumno.id_profesor_encargado) if alumno.id_profesor_encargado else 'N/D',
     ]
 
@@ -428,11 +450,13 @@ def _fila_inscripcion(inscripcion):
     alumno = inscripcion.alumno
     grupo = inscripcion.grupo
     direccion = alumno.id_direccion_residencia
-    representante = _primera_relacion(alumno, 'representantes_vinculados')
+    relacion = _primera_relacion(alumno, 'representantes_vinculados')
+    # El pivot devuelve AlumnoRepresentante; la persona es .representante
+    representante = relacion.representante if relacion else None
 
     repre_nombre = _obtener_nombre_y_apellido(representante) if representante else 'N/D'
-    repre_tipo_doc, repre_num_doc = _separar_documento(representante.numero_documento_identidad) if representante else ('', '')
-    repre_telefono = representante.telefono if representante else 'N/D'
+    repre_tipo_doc, repre_num_doc = _separar_documento(representante.cedula) if representante else ('', '')
+    repre_telefono = (representante.telefono_principal or 'N/D') if representante else 'N/D'
 
     alumno_nombre = _obtener_nombre_y_apellido(alumno)
     profesor_nombre = _obtener_nombre_y_apellido(grupo.profesor_director) if grupo.profesor_director else 'N/D'

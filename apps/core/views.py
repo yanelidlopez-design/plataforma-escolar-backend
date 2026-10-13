@@ -41,6 +41,10 @@ def custom_token_obtain(request):
 
             # Set access_token as HttpOnly cookie
             response = Response({
+                # 'access' también en el body: en dev el frontend corre en otro
+                # origen (p. ej. :5173) y las cookies SameSite=Lax no viajan en
+                # XHR cross-origin, así que el cliente usa Authorization: Bearer.
+                'access': access_token,
                 'refresh': refresh_token,
                 'user': {
                     'username': user.nombre_usuario,

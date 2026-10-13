@@ -4,7 +4,8 @@ from .views import (
     AlumnosViewSet, GruposAcademicosViewSet,
     InscripcionesViewSet, CalificacionesViewSet, AsistenciasViewSet,
     exportar_asistencias_csv, exportar_asistencias_excel, exportar_asistencias_pdf,
-    webhook_google_forms, generar_comprobante_inscripcion_pdf
+    webhook_google_forms, generar_comprobante_inscripcion_pdf,
+    estado_exportacion, descargar_exportacion
 )
 
 router = DefaultRouter()
@@ -20,5 +21,7 @@ urlpatterns = [
     path('asistencias/exportar-csv/', exportar_asistencias_csv, name='exportar_asistencias_csv'),
     path('asistencias/exportar-excel/', exportar_asistencias_excel, name='exportar_asistencias_excel'),
     path('asistencias/exportar-pdf/', exportar_asistencias_pdf, name='exportar_asistencias_pdf'),
+    path('exports/<str:reporte_id>/', estado_exportacion, name='estado_exportacion'),
+    path('exports/<str:reporte_id>/descarga/', descargar_exportacion, name='descargar_exportacion'),
     path('', include(router.urls)),
 ]

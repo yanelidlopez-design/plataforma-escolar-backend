@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'drf_yasg',
     'rest_framework',
     'corsheaders',
+    'django_q',
 
     # Local apps
     'apps.core.apps.CoreConfig',
@@ -105,8 +106,9 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        # JWT (frontend envía Authorization: Bearer <access>)
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        # JWT contra core.Usuarios (acepta Authorization: Bearer o la cookie
+        # HttpOnly 'access_token' que emite el login). Ver apps.core.authentication.
+        'apps.core.authentication.UsuariosJWTAuthentication',
         # Sesión/Basic para el browsable API y el admin de Django
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
@@ -117,6 +119,9 @@ REST_FRAMEWORK = {
 # Ejemplo: CORS_ALLOWED_ORIGINS=http://localhost:3000,https://tufrontend.com
 cors_origins_str = env('CORS_ALLOWED_ORIGINS', default='')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_str.split(',') if origin.strip()] if cors_origins_str else []
+# Usado junto con CORS_ALLOWED_ORIGINS para que el navegador acepte
+# cookies (p. ej. 'access_token') en peticiones cross-origin.
+CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = False
 
 LANGUAGE_CODE = 'es-es'
@@ -129,6 +134,26 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+
+# Archivos de usuario (exportaciones generadas en segundo plano por django-q2)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Cola de tareas asíncronas (Misión 10): broker basado en ORM (sin Redis).
+# Consumo mínimo para entorno local de 8GB: 2 workers, bulk=1.
+# El worker se ejecuta con: python manage.py qcluster
+Q_CLUSTER = {
+    'name': 'plataforma_escolar',
+    'workers': 2,
+    'timeout': 300,          # 5 min máximo por reporte
+    'retry': 360,
+    'queue_limit': 50,
+    'bulk': 1,
+    'orm': 'default',        # broker = base de datos de Django
+    'label': 'Django Q',
+    'save_limit': 250,
+    'catch_up': False,
+}
 
 SWAGGER_SETTINGS = {
     'USE_SESSION_AUTH': True,
