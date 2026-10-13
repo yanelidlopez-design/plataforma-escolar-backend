@@ -213,3 +213,31 @@ Componentes:
   (`apps/academico/tokens.py`), que valida el refresh contra `core.Usuarios`
   (no `auth.User`) y devuelve el `access` renovado en el body y en cookie.
 
+---
+
+## 6. Pipeline de seguridad (Misión 11)
+
+El CI de ambos repos incluye gates de seguridad que bloquean el flujo en rojo:
+
+| Repo | Gate | Umbral de bloqueo |
+|---|---|---|
+| Backend | `bandit -r apps/ -ll` (SAST) | severidad MEDIUM+ (el informe JSON se sube como artefacto) |
+| Backend | `pip-audit --strict -r requirements.txt` | cualquier CVE conocido |
+| Frontend | `npm audit --audit-level=high` | severidad HIGH/CRITICAL |
+
+Para bloquear el *merge* (no solo el flujo), habilitar en GitHub
+*Settings → Branches → Branch protection* la regla
+**Require status checks to pass** con los checks `backend-tests`,
+`backend-security` y `ci`.
+
+Remediaciones aplicadas al abrir el pipeline (ambos scans quedaron en verde):
+
+- `Django` 5.0.14 → **5.2.18** (LTS; la rama 5.0 está EOL y acumulaba 12 PYSEC).
+- `PyJWT` fijado a **2.15.1** y `djangorestframework-simplejwt` a **5.5.1**
+  (15 advisories del token handler).
+- Frontend: sustituida la dependencia `xlsx` (SheetJS) por **exceljs** —
+  la única versión parcheada de su advisory ReDoS (GHSA-5pgg-2g8v-p4x9)
+  vive fuera del registro npm y npm ≥ 12 bloquea tarballs remotos
+  (`EALLOWREMOTE`); `exportUtils.exportToExcel` se reescribió sobre exceljs
+  manteniendo la misma firma.
+
