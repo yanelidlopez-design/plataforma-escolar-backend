@@ -1,0 +1,9 @@
+*                                       @yanelidlopez-design
+.github/                                @yanelidlopez-design
+core/                                   @yanelidlopez-design
+apps/core/                              @yanelidlopez-design
+poblar_datos_prueba.py                  @yanelidlopez-design
+apps/                                   @yanelidlopez-design
+apps/academico/reports.py               @yanelidlopez-design
+**/tests/                               @yanelidlopez-design
+pytest.ini                              @yanelidlopez-design
