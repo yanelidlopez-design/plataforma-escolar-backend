@@ -132,15 +132,15 @@ class TestVinculacionWebhook:
         assert alumno.id_profesor_encargado == profesor
 
     def test_profesor_encargado_por_cedula_con_prefijo(self, tablas_legacy):
-        """"V-19REMOVED_SECRET" también matchea (se reducen los dígitos)."""
+        """"V-19555444" también matchea (se reducen los dígitos)."""
         profesor = Profesores.objects.create(
-            cedula='19REMOVED_SECRET',
+            cedula='19555444',
             primer_nombre='María',
             primer_apellido='López',
             categoria='Profesor',
         )
         alumno, error = procesar_alumno_webhook(
-            self._payload(profesor_encargado='V-19REMOVED_SECRET')
+            self._payload(profesor_encargado='V-19555444')
         )
         assert error is None
         assert alumno.id_profesor_encargado == profesor
