@@ -40,5 +40,5 @@ def tablas_legacy(transactional_db):
     # consultaría tablas legacy que no existen (inscripciones, notas...).
     for modelo in reversed(MODELOS_LEGACY):
         with connection.cursor() as cursor:
-            cursor.execute(f'DELETE FROM "{modelo._meta.db_table}"')
+            cursor.execute(f'DELETE FROM "{modelo._meta.db_table}"')  # nosec B608
     yield

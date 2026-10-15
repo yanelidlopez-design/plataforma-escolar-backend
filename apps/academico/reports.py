@@ -12,7 +12,7 @@ from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from xml.sax.saxutils import escape
+from html import escape  # escapado de texto para Paragraph (sin parseo XML)
 from .models import Alumnos, GruposAcademicos, Inscripciones, Asistencias
 from apps.core.models import GradosAcademicos as CoreGradosAcademicos, Secciones
 
@@ -169,7 +169,7 @@ def _crear_estilos_comprobante():
 
 
 def _separar_documento(valor):
-    """Separa tipo y número de documento (ej: 'V-REMOVED_SECRET78' -> 'V', 'REMOVED_SECRET78')."""
+    """Separa tipo y número de documento (ej: 'V-19888777' -> 'V', '19888777')."""
     if not valor:
         return '', ''
     valor = str(valor).strip()

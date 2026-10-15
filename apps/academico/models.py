@@ -1,4 +1,13 @@
+import hashlib
+
 from django.db import models
+
+
+def generar_nombre_unico_archivo(instance, filename):
+    # Se usa MD5 exclusivamente para acortar el nombre (no para fines criptográficos)
+    hash_txt = hashlib.md5(filename.encode('utf-8'), usedforsecurity=False).hexdigest()
+    return f"tareas/{hash_txt}_{filename}"
+
 
 class Alumnos(models.Model):
     id_alumno = models.AutoField(primary_key=True, db_column='id_alumno')
