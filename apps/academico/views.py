@@ -814,6 +814,30 @@ def generar_comprobante_inscripcion_pdf(request, inscripcion_id):
             'numero_en_el_planter': openapi.Schema(type=openapi.TYPE_INTEGER),
             'ingreso_familiar': openapi.Schema(type=openapi.TYPE_NUMBER),
             'observaciones': openapi.Schema(type=openapi.TYPE_STRING),
+            'profesor_encargado': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Cédula o nombre completo del docente guía (se resuelve contra personal.Profesores)',
+            ),
+            'parentesco': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Parentesco del representante legal con el alumno',
+            ),
+            'representante': openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                description='Representante legal (requiere cedula, nombre y telefono para vincularlo)',
+                properties={
+                    'cedula': openapi.Schema(type=openapi.TYPE_STRING),
+                    'nombre': openapi.Schema(
+                        type=openapi.TYPE_STRING,
+                        description='Nombre completo (se expande a primer_nombre/primer_apellido)',
+                    ),
+                    'telefono': openapi.Schema(type=openapi.TYPE_STRING),
+                    'telefono_secundario': openapi.Schema(type=openapi.TYPE_STRING),
+                    'email': openapi.Schema(type=openapi.TYPE_STRING),
+                    'carnet_patria': openapi.Schema(type=openapi.TYPE_STRING),
+                    'ocupacion': openapi.Schema(type=openapi.TYPE_STRING),
+                },
+            ),
             'direccion': openapi.Schema(
                 type=openapi.TYPE_OBJECT,
                 properties={

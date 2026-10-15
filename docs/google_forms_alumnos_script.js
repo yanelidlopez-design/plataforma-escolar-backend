@@ -7,8 +7,9 @@
  *    Al enviarse el formulario, empaqueta las respuestas en un payload PLANO
  *    (tal como lo espera el backend) y hace:
  *      POST {URL_WEBHOOK}  con header  X-Webhook-Token: {TOKEN}
- *    El backend crea el alumno, su dirección, carnet/finanzas/datos familiares
- *    y, si reconoce el grupo, la inscripción con pago.
+ *    El backend crea el alumno, su dirección, carnet/finanzas/datos familiares,
+ *    asigna el profesor encargado (Docente Guía) y vincula el representante
+ *    legal; y, si reconoce el grupo, la inscripción con pago.
  *
  *  INSTALACIÓN (1 sola vez):
  *    1. Editor del Google Form: ⋮ (menú superior) → Script editor.
@@ -66,11 +67,28 @@ var CONFIG = {
  *  - `contiene`: fragmentos del título de la pregunta (comparados en minúsculas,
  *    sin acentos, sin signos y sin palabras vacías: "N° de cuenta" ≡ "n cuenta"),
  *    gana la PRIMERA coincidencia.
- *  - `campo`: clave del payload del backend (anidados como 'direccion.calle').
+ *  - `campo`: clave del payload del backend (anidados como 'direccion.calle'
+ *    o 'representante.cedula'; si el form separa nombre y apellido del
+ *    representante, se unen automáticamente en representante.nombre).
  *  - `tipo` (opcional): 'fecha' | 'booleano' → conversión especial.
  * Si agregas una pregunta al form, añade aquí su entrada (o corre listarPreguntas()).
  */
 var MAPEO = [
+  // --- Representante legal (¡primero! cualquier título con "representante" cae aquí) ---
+  // El catch-all 'representante' mapea a representante.nombre (nombre COMPLETO).
+  { contiene: ['parentesco'], campo: 'parentesco' },
+  { contiene: ['cedula representante', 'identidad representante'], campo: 'representante.cedula' },
+  { contiene: ['telefono representante', 'telefono contacto representante', 'celular representante'], campo: 'representante.telefono' },
+  { contiene: ['correo representante', 'correo electronico representante', 'email representante'], campo: 'representante.email' },
+  { contiene: ['carnet patria representante'], campo: 'representante.carnet_patria' },
+  { contiene: ['ocupacion representante'], campo: 'representante.ocupacion' },
+  { contiene: ['nombre y apellido representante', 'nombre completo representante', 'nombre representante'], campo: 'representante.nombre' },
+  { contiene: ['apellido representante'], campo: 'representante.apellido' },
+  { contiene: ['representante'], campo: 'representante.nombre' },
+
+  // --- Profesor encargado (Docente Guía): cédula o nombre completo ---
+  { contiene: ['profesor encargado', 'docente guia', 'profesor guia'], campo: 'profesor_encargado' },
+
   // --- Datos personales del alumno ---
   { contiene: ['tipo documento'], campo: 'tipo_documento_identidad' },
   { contiene: ['numero documento'], campo: 'numero_documento_identidad' },
@@ -155,6 +173,11 @@ function alEnviarFormulario(e) {
     return;
   }
 
+  if (datos.representante &&
+      (!datos.representante.cedula || !datos.representante.nombre || !datos.representante.telefono)) {
+    Logger.log('⚠ Representante incompleto (requiere cedula, nombre y telefono): el backend lo ignorará.');
+  }
+
   var opciones = {
     method: 'post',
     contentType: 'application/json',
@@ -203,13 +226,19 @@ function construirPayload_(respuestas) {
     }
 
     var valor = normalizarRespuesta_(entrada, respuesta);
-    if (entrada.campo.indexOf('direccion.') === 0) {
-      var clave = entrada.campo.split('.')[1];
-      datos.direccion = datos.direccion || {};
-      if (valor !== '') datos.direccion[clave] = valor;
+    if (entrada.campo.indexOf('.') !== -1) {
+      // Campo anidado: 'direccion.calle' → datos.direccion.calle
+      var partes = entrada.campo.split('.');
+      datos[partes[0]] = datos[partes[0]] || {};
+      if (valor !== '') datos[partes[0]][partes[1]] = valor;
     } else {
       datos[entrada.campo] = valor;
     }
+  }
+  // Representante: si el form separa nombre y apellido, se unen en nombre
+  if (datos.representante && datos.representante.apellido) {
+    datos.representante.nombre = ((datos.representante.nombre || '') + ' ' + datos.representante.apellido).trim();
+    delete datos.representante.apellido;
   }
   return datos;
 }

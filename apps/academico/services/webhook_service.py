@@ -2,12 +2,14 @@
 Business logic for Google Forms webhook operations.
 """
 import logging
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
 
 from apps.core.models import Direcciones
+from apps.personal.models import AlumnoRepresentante, Profesores, RepresentantesLegales
 
 from ..models import Alumnos, GruposAcademicos, Inscripciones
 
@@ -75,6 +77,92 @@ def _a_fecha(valor):
         except ValueError:
             continue
     return None
+
+
+def _normalizar_nombre(texto):
+    """'María José  López' → 'maria jose lopez' (sin acentos, minúsculas, espacios simples)."""
+    texto = unicodedata.normalize('NFD', str(texto or ''))
+    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+    return ' '.join(texto.lower().split())
+
+
+def _resolver_profesor_encargado(valor):
+    """
+    Resuelve el profesor encargado (Docente Guía) a partir de la cédula o del
+    nombre completo enviado en el webhook (campo 'profesor_encargado').
+    Si no se encuentra, devuelve None y registra un warning (no bloquea
+    la creación del alumno).
+    """
+    if valor is None or str(valor).strip() == '':
+        return None
+    texto = str(valor).strip()
+
+    # 1) Por cédula: exacta o reducida a dígitos ('V-30999888' → '30999888')
+    profesor = Profesores.objects.filter(cedula=texto).first()
+    if profesor:
+        return profesor
+    digitos = ''.join(c for c in texto if c.isdigit())
+    if digitos and digitos != texto:
+        profesor = Profesores.objects.filter(cedula=digitos).first()
+        if profesor:
+            return profesor
+
+    # 2) Por nombre completo (normalizado: sin acentos ni dobles espacios)
+    objetivo = _normalizar_nombre(texto)
+    if len(objetivo.split()) >= 2:
+        for candidato in Profesores.objects.all():
+            nombre_bd = _normalizar_nombre(
+                f'{candidato.primer_nombre} {candidato.segundo_nombre or ""} '
+                f'{candidato.primer_apellido} {candidato.segundo_apellido or ""}'
+            )
+            if nombre_bd == objetivo or nombre_bd.replace(' ', '') == objetivo.replace(' ', ''):
+                return candidato
+
+    logger.warning('Profesor encargado no encontrado en personal.Profesores: %r', valor)
+    return None
+
+
+def _vincular_representante_webhook(alumno, representante_data, parentesco):
+    """
+    Crea/busca el representante legal por cédula y lo vincula al alumno
+    (misma semántica que AlumnosSerializer._vincular_representante):
+    - get_or_create por cédula (reutiliza si ya existe).
+    - El nombre completo se expande a primer_nombre/primer_apellido (NOT NULL legacy).
+    - Se crea/actualiza la fila pivote con parentesco y es_principal=True.
+    - Solo puede haber UN representante principal por alumno.
+    NOTA: la pivote tiene PK compuesta (id_alumno, id_representante) en la BD,
+    por eso se usa filter().update()/create() en lugar de update_or_create().
+    """
+    partes = str(representante_data['nombre']).split()
+    primer_nombre = partes[0]
+    primer_apellido = ' '.join(partes[1:]) if len(partes) > 1 else 'S/I'
+
+    representante, _creado = RepresentantesLegales.objects.get_or_create(
+        cedula=representante_data['cedula'],
+        defaults={
+            'primer_nombre': primer_nombre,
+            'primer_apellido': primer_apellido,
+            'telefono_principal': representante_data['telefono'],
+            'email': representante_data.get('email') or None,
+            'carnet_patria': representante_data.get('carnet_patria') or None,
+            'telefono_secundario': representante_data.get('telefono_secundario') or None,
+            'ocupacion': representante_data.get('ocupacion') or None,
+        },
+    )
+
+    valores = {
+        'parentesco': parentesco or 'Sin especificar',
+        'es_principal': True,
+    }
+    actualizados = AlumnoRepresentante.objects.filter(
+        alumno=alumno, representante=representante
+    ).update(**valores)
+    if not actualizados:
+        AlumnoRepresentante.objects.create(alumno=alumno, representante=representante, **valores)
+    AlumnoRepresentante.objects.filter(alumno=alumno).exclude(
+        representante=representante
+    ).update(es_principal=False)
+    return representante
 
 
 def procesar_alumno_webhook(data):
@@ -153,6 +241,8 @@ def procesar_alumno_webhook(data):
         'numero_en_el_planter': _a_entero(data.get('numero_en_el_planter')),
         'ingreso_familiar': _a_decimal(data.get('ingreso_familiar')),
         'observaciones': data.get('observaciones') or None,
+        # Profesor encargado (Docente Guía): cédula o nombre completo (ver _resolver_profesor_encargado)
+        'id_profesor_encargado': _resolver_profesor_encargado(data.get('profesor_encargado')),
         'fecha_inscripcion_inicial': _a_fecha(data.get('fecha_inscripcion_inicial')) or date.today(),
         'estatus_general': 'Activo',
     }
@@ -178,6 +268,21 @@ def procesar_alumno_webhook(data):
                 logger.warning(
                     'Dirección incompleta ignorada en webhook (requiere calle, ciudad y estado): %s',
                     direccion_data,
+                )
+
+            # Representante legal: requiere cedula, nombre y telefono completos
+            # (si está incompleto se ignora con warning, como la dirección).
+            representante_data = data.get('representante') or {}
+            if (
+                representante_data.get('cedula')
+                and representante_data.get('nombre')
+                and representante_data.get('telefono')
+            ):
+                _vincular_representante_webhook(alumno, representante_data, data.get('parentesco'))
+            elif representante_data:
+                logger.warning(
+                    'Representante incompleto ignorado en webhook (requiere cedula, nombre y telefono): %s',
+                    representante_data,
                 )
 
         return alumno, None
