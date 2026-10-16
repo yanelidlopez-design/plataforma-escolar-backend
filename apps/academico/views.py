@@ -1,4 +1,5 @@
 from rest_framework import viewsets, filters, status, permissions
+from rest_framework.generics import ListAPIView
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -14,7 +15,8 @@ from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, As
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
-    AlumnoInscripcionSerializer
+    AlumnoInscripcionSerializer,
+    PeriodoInscripcionSerializer,
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
@@ -1121,4 +1123,34 @@ class AlternarUrlInscripcionAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+# ============================================================================
+# ENDPOINT DE LISTADO DE PERIODOS DE INSCRIPCION (ADMIN)
+# ============================================================================
+
+class PeriodoInscripcionListAPIView(ListAPIView):
+    """
+    Listado de periodos de inscripción para el panel administrativo.
+
+    Devuelve pk, nombre, fechas, estado del switch (activo_manual) y
+    token_acceso. Requiere autenticación JWT (IsAuthenticated).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PeriodoInscripcionSerializer
+    queryset = PeriodoInscripcion.objects.all()
+
+    @swagger_auto_schema(
+        tags=['Periodos de Inscripción'],
+        operation_summary='Listar periodos de inscripción',
+        operation_description='Retorna todos los periodos de inscripción con su pk, '
+                              'nombre, calendario, activo_manual y token_acceso. '
+                              'Requiere autenticación JWT.',
+        responses={
+            200: PeriodoInscripcionSerializer(many=True),
+            401: openapi.Response('No autenticado'),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 

@@ -3,7 +3,14 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias
+from .models import (
+    Alumnos,
+    GruposAcademicos,
+    Inscripciones,
+    Calificaciones,
+    Asistencias,
+    PeriodoInscripcion,
+)
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
 from apps.personal.serializers import ProfesoresSerializer
@@ -492,3 +499,25 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 f'No se pudo completar la inscripción: {exc}'
             )
+
+
+class PeriodoInscripcionSerializer(serializers.ModelSerializer):
+    """
+    Serializador de solo lectura para el listado de periodos de inscripción.
+
+    Expone pk (id), nombre, calendario, estado del switch y token_acceso
+    para que el panel administrativo pueda construir el formulario público
+    y alternar el estado de cada periodo.
+    """
+
+    class Meta:
+        model = PeriodoInscripcion
+        fields = [
+            'id',
+            'nombre',
+            'fecha_inicio',
+            'fecha_fin',
+            'activo_manual',
+            'token_acceso',
+        ]
+        read_only_fields = fields
