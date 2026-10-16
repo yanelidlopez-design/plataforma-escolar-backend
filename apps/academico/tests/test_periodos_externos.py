@@ -300,3 +300,31 @@ def test_alternar_estado_exitoso(api_client, usuario_admin, periodo_activo, tabl
     # Verificar que el cambio se persistió físicamente en la BD
     periodo_activo.refresh_from_db()
     assert periodo_activo.activo_manual is False  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Listado de periodos (GET protegido con JWT)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_listar_periodos_sin_autenticacion(api_client, tablas_legacy):
+    """GET a periodos/ sin JWT debe retornar 401 Unauthorized."""
+    url = reverse('listar_periodos')
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED  # nosec B101
+
+
+@pytest.mark.django_db
+def test_listar_periodos_exitoso(api_client, usuario_admin, periodo_activo, tablas_legacy):
+    """GET a periodos/ autenticado retorna 200 y datos del periodo."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('listar_periodos')
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert isinstance(response.data, list)  # nosec B101
+    assert any(item['id'] == periodo_activo.pk for item in response.data)  # nosec B101
+    assert any(item['token_acceso'] == periodo_activo.token_acceso for item in response.data)  # nosec B101
+    assert any(item['activo_manual'] is True for item in response.data)  # nosec B101

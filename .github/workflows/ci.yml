@@ -20,6 +20,13 @@ jobs:
       DEBUG: "True"
       ALLOWED_HOSTS: "localhost,127.0.0.1"
       WEBHOOK_SECRET_TOKEN: "whk-test-token-for-ci"
+      # Variables de base de datos necesarias para importar settings.py
+      # (manage.py check --deploy no conecta a la BD, solo valida la configuración).
+      DB_NAME: "ci_test"
+      DB_USER: "ci_test"
+      DB_PASSWORD: "ci_test"
+      DB_HOST: "127.0.0.1"
+      DB_PORT: "3306"
 
     steps:
     - name: Checkout code
@@ -83,7 +90,9 @@ jobs:
     - name: Install security tools (versions pinned in requirements.txt)
       run: |
         python -m pip install --upgrade pip
-        pip install $(grep -E '^(bandit|pip-audit)==' requirements.txt)
+        # requirements.txt usa el formato de pip-compile con barras de
+        # continuación y hashes; instalar las versiones exactas directamente.
+        pip install "bandit==1.9.4" "pip-audit==2.10.1"
 
     - name: Run bandit security scan (SAST)
       run: |
