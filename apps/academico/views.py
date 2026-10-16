@@ -1,4 +1,4 @@
-from rest_framework import viewsets, filters, status, permissions
+from rest_framework import viewsets, filters, status, permissions, APIView
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
@@ -931,4 +931,72 @@ def descargar_exportacion(request, reporte_id):
         as_attachment=True,
         filename=reporte.get('archivo', 'reporte.bin')
     )
+
+
+# ============================================================================
+# ENDPOINT DE INSCRIPCIÓN CON REPRESENTANTE ANIDADO
+# ============================================================================
+
+class AlumnoInscripcionAPIView(APIView):
+    """
+    Endpoint para inscribir un alumno junto con su representante legal
+    en una sola operación atómica.
+    Requiere autenticación JWT válida (IsAuthenticated).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = AlumnoInscripcionSerializer
+
+    @swagger_auto_schema(
+        tags=['Inscripciones'],
+        operation_summary='Inscribir alumno con representante anidado',
+        operation_description='Crea alumno, representante (idempotente por cédula), '
+                              'vínculo AlumnoRepresentante e Inscripción en una transacción.',
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['primer_nombre', 'primer_apellido', 'tipo_documento_identidad',
+                      'numero_documento_identidad', 'fecha_nacimiento', 'genero',
+                      'representante', 'id_grupo'],
+            properties={
+                'primer_nombre': openapi.Schema(type=openapi.TYPE_STRING),
+                'primer_apellido': openapi.Schema(type=openapi.TYPE_STRING),
+                'tipo_documento_identidad': openapi.Schema(type=openapi.TYPE_STRING),
+                'numero_documento_identidad': openapi.Schema(type=openapi.TYPE_STRING),
+                'cedula_escolar': openapi.Schema(type=openapi.TYPE_STRING),
+                'fecha_nacimiento': openapi.Schema(type=openapi.TYPE_STRING, format='date'),
+                'genero': openapi.Schema(type=openapi.TYPE_STRING),
+                'representante': openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    required=['cedula', 'nombre', 'apellido', 'telefono'],
+                    properties={
+                        'cedula': openapi.Schema(type=openapi.TYPE_STRING),
+                        'nombre': openapi.Schema(type=openapi.TYPE_STRING),
+                        'apellido': openapi.Schema(type=openapi.TYPE_STRING),
+                        'telefono': openapi.Schema(type=openapi.TYPE_STRING),
+                        'correo': openapi.Schema(type=openapi.TYPE_STRING, format='email'),
+                    },
+                ),
+                'id_grupo': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'fecha_inscripcion': openapi.Schema(type=openapi.TYPE_STRING, format='date-time'),
+                'monto_pago': openapi.Schema(type=openapi.TYPE_NUMBER),
+            },
+        ),
+        responses={
+            201: openapi.Response('Inscripción creada exitosamente'),
+            400: openapi.Response('Error de validación'),
+            401: openapi.Response('No autenticado'),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = AlumnoInscripcionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        inscripcion = serializer.save()
+        return Response(
+            {
+                'success': True,
+                'message': 'Inscripción creada exitosamente',
+                'inscripcion_id': inscripcion.id_inscripcion,
+                'alumno_id': inscripcion.alumno.id_alumno,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 

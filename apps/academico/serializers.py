@@ -377,3 +377,118 @@ class AsistenciasSerializer(serializers.ModelSerializer):
         if value not in opciones_validas:
             raise serializers.ValidationError(f"El estado debe ser una de las siguientes opciones: {opciones_validas}")
         return value
+
+
+# ============================================================================
+# SERIALIZADORES PARA INSCRIPCIÓN CON REPRESENTANTE ANIDADO
+# ============================================================================
+
+class RepresentanteSerializer(serializers.Serializer):
+    """
+    Serializador para los datos básicos del tutor/representante legal.
+    Se utiliza dentro del flujo de inscripción de alumnos.
+    El campo 'cedula' no tiene validador único para permitir la reutilización
+    de registros de representante (un tutor puede tener varios alumnos).
+    """
+    cedula = serializers.CharField(max_length=20, required=True, validators=[])
+    nombre = serializers.CharField(max_length=150, required=True)
+    apellido = serializers.CharField(max_length=150, required=True)
+    telefono = serializers.CharField(max_length=20, required=True)
+    correo = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
+
+
+class AlumnoInscripcionSerializer(serializers.Serializer):
+    """
+    Serializador para la inscripción de un alumno con su representante anidado.
+    Crea en una transacción atómica:
+      1. El representante (idempotente por cédula vía update_or_create).
+      2. El registro del alumno.
+      3. El vínculo AlumnoRepresentante (tabla pivote).
+      4. La Inscripción académica formal en el grupo provisto.
+    """
+    # --- Datos del alumno ---
+    primer_nombre = serializers.CharField(max_length=150, required=True)
+    segundo_nombre = serializers.CharField(max_length=150, required=False, allow_blank=True, allow_null=True)
+    primer_apellido = serializers.CharField(max_length=150, required=True)
+    segundo_apellido = serializers.CharField(max_length=150, required=False, allow_blank=True, allow_null=True)
+    tipo_documento_identidad = serializers.CharField(max_length=50, required=True)
+    numero_documento_identidad = serializers.CharField(max_length=30, required=True)
+    cedula_escolar = serializers.CharField(max_length=30, required=False, allow_blank=True, allow_null=True)
+    fecha_nacimiento = serializers.DateField(required=True)
+    genero = serializers.CharField(max_length=50, required=True)
+    lugar_nacimiento = serializers.CharField(max_length=255, required=False, allow_blank=True, allow_null=True)
+    nacionalidad = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    grupo_sanguineo = serializers.CharField(max_length=10, required=False, allow_blank=True, allow_null=True)
+    alergico_a = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    peso_kg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    talla_cm = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    fecha_inscripcion_inicial = serializers.DateField(required=False, allow_null=True)
+    estatus_general = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+
+    # --- Representante anidado ---
+    representante = RepresentanteSerializer(required=True)
+
+    # --- Datos de inscripción ---
+    id_grupo = serializers.IntegerField(required=True)
+    fecha_inscripcion = serializers.DateTimeField(required=False, allow_null=True)
+    estado_inscripcion = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    monto_pago = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    referencia_bancaria = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+
+    def create(self, validated_data):
+        from apps.personal.models import RepresentantesLegales, AlumnoRepresentante
+
+        representante_data = validated_data.pop('representante')
+        id_grupo = validated_data.pop('id_grupo')
+        fecha_inscripcion = validated_data.pop('fecha_inscripcion', None) or timezone.now()
+        estado_inscripcion = validated_data.pop('estado_inscripcion', 'Activa') or 'Activa'
+        # Campos obligatorios de Alumnos no siempre enviados por el frontend:
+        if not validated_data.get('fecha_inscripcion_inicial'):
+            validated_data['fecha_inscripcion_inicial'] = timezone.now().date()
+        if not validated_data.get('estatus_general'):
+            validated_data['estatus_general'] = 'Activo'
+        monto_pago = validated_data.pop('monto_pago', None)
+        referencia_bancaria = validated_data.pop('referencia_bancaria', None)
+
+        try:
+            with transaction.atomic():
+                # 1) Resolver representante de forma idempotente por cédula.
+                representante, _ = RepresentantesLegales.objects.update_or_create(
+                    cedula=representante_data['cedula'],
+                    defaults={
+                        'primer_nombre': representante_data.get('nombre', ''),
+                        'primer_apellido': representante_data.get('apellido', ''),
+                        'telefono_principal': representante_data.get('telefono', ''),
+                        'email': representante_data.get('correo') or None,
+                    },
+                )
+
+                # 2) Crear el registro del alumno.
+                alumno = Alumnos.objects.create(**validated_data)
+
+                # 3) Vincular alumno y representante en la tabla pivote.
+                AlumnoRepresentante.objects.create(
+                    alumno=alumno,
+                    representante=representante,
+                    parentesco='Padre',
+                    es_principal=True,
+                )
+
+                # 4) Registrar la inscripción académica formal en el grupo provisto.
+                grupo = GruposAcademicos.objects.get(pk=id_grupo)
+                inscripcion = Inscripciones.objects.create(
+                    alumno=alumno,
+                    grupo=grupo,
+                    fecha_inscripcion=fecha_inscripcion,
+                    estado_inscripcion=estado_inscripcion,
+                    monto_pago=monto_pago,
+                    referencia_bancaria=referencia_bancaria,
+                )
+
+            return inscripcion
+
+        except Exception as exc:
+            logger.debug('Error en inscripción anidada con representante', exc_info=True)
+            raise serializers.ValidationError(
+                f'No se pudo completar la inscripción: {exc}'
+            )
