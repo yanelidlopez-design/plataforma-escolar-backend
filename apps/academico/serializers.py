@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
@@ -8,12 +10,15 @@ from apps.personal.serializers import ProfesoresSerializer
 from apps.personal.models import RepresentantesLegales, AlumnoRepresentante
 
 
+logger = logging.getLogger(__name__)
+
+
 class RepresentanteAnidadoSerializer(serializers.Serializer):
     """
     Datos del representante legal anidados dentro de la creación de un alumno.
     JSON conceptual:
     {
-      "representante": {"cedula": "V-REMOVED_SECRET78", "nombre": "Pedro Perez", "telefono": "0412REMOVED_SECRET7"},
+      "representante": {"cedula": "V-19888777", "nombre": "Pedro Perez", "telefono": "04125555555"},
       "parentesco": "Padre"
     }
     """
@@ -76,7 +81,7 @@ class AlumnosSerializer(serializers.ModelSerializer):
             if inscripcion and inscripcion.grupo:
                 return inscripcion.grupo.grado.nombre_grado if hasattr(inscripcion.grupo.grado, 'nombre_grado') else str(inscripcion.grupo.grado)
         except Exception:
-            pass
+            logger.debug('Campo derivado no disponible para alumno %s', obj.pk, exc_info=True)
         return None
 
     def get_seccion_actual(self, obj):
@@ -86,7 +91,7 @@ class AlumnosSerializer(serializers.ModelSerializer):
             if inscripcion and inscripcion.grupo:
                 return inscripcion.grupo.seccion.nombre_seccion if hasattr(inscripcion.grupo.seccion, 'nombre_seccion') else str(inscripcion.grupo.seccion)
         except Exception:
-            pass
+            logger.debug('Campo derivado no disponible para alumno %s', obj.pk, exc_info=True)
         return None
 
     def get_profesor_encargado(self, obj):
@@ -98,14 +103,14 @@ class AlumnosSerializer(serializers.ModelSerializer):
             if obj.id_profesor_encargado:
                 return f"{obj.id_profesor_encargado.primer_nombre} {obj.id_profesor_encargado.primer_apellido}".strip()
         except Exception:
-            pass
+            logger.debug('Campo derivado no disponible para alumno %s', obj.pk, exc_info=True)
         try:
             inscripcion = obj.inscripciones.filter(estado_inscripcion__in=['Activa', 'Graduado']).first()
             if inscripcion and inscripcion.grupo and inscripcion.grupo.profesor_director:
                 profesor = inscripcion.grupo.profesor_director
                 return f"{profesor.primer_nombre} {profesor.primer_apellido}"
         except Exception:
-            pass
+            logger.debug('Campo derivado no disponible para alumno %s', obj.pk, exc_info=True)
         return None
 
     def get_grupo_inscripcion_id(self, obj):

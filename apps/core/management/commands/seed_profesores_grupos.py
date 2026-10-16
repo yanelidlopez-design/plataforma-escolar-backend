@@ -12,13 +12,15 @@ Motivación:
     grupos de Preescolar pueden tener id_profesor_principal = NULL.
 
 Uso:
-    python manage.py seed_profesores_grupos
+    SEED_PASSWORD=<contraseña> python manage.py seed_profesores_grupos
 
 Es seguro ejecutarlo múltiples veces (get_or_create por nombre_usuario y
 por cédula; la asignación de grupo se re-aplica de forma idempotente).
 """
 
-from django.core.management.base import BaseCommand
+import os
+
+from django.core.management.base import BaseCommand, CommandError
 from django.contrib.auth.hashers import make_password
 from apps.core.models import Usuarios
 from apps.personal.models import Profesores
@@ -37,8 +39,9 @@ PROFESORES_PREESCOLAR = [
      "Rosa", "María", "Aguilar", "Linares", "V-20000003"),
 ]
 
-# Contraseña de prueba para los usuarios creados.
-PASSWORD_PRUEBA = "Profe2026*"
+# Contraseña de prueba: nunca como literal en el código; se toma de la
+# variable de entorno SEED_PASSWORD (validada en handle()).
+PASSWORD_PRUEBA = os.environ.get("SEED_PASSWORD", "")
 
 
 class Command(BaseCommand):
@@ -104,6 +107,11 @@ class Command(BaseCommand):
         return profesor
 
     def handle(self, *args, **options):
+        if not PASSWORD_PRUEBA:
+            raise CommandError(
+                "SEED_PASSWORD no está definida: exporte la variable de entorno "
+                "con la contraseña de prueba antes de ejecutar el seed."
+            )
         self.stdout.write("Sembrando profesores de Preescolar...")
 
         profesores = [self._crear_profesor(d) for d in PROFESORES_PREESCOLAR]

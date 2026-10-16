@@ -29,8 +29,8 @@ class TestWebhookService:
         }
 
         alumno, error = procesar_alumno_webhook(data)
-        assert alumno is None
-        assert 'requerido' in error.lower()
+        assert alumno is None  # nosec B101
+        assert 'requerido' in error.lower()  # nosec B101
 
     def test_procesar_alumno_invalid_fecha(self):
         """Test that an unparseable fecha_nacimiento returns a clear error."""
@@ -43,15 +43,15 @@ class TestWebhookService:
         }
 
         alumno, error = procesar_alumno_webhook(data)
-        assert alumno is None
-        assert 'fecha_nacimiento' in error
+        assert alumno is None  # nosec B101
+        assert 'fecha_nacimiento' in error  # nosec B101
 
     def test_procesar_inscripcion_validation_structure(self):
         """Test that inscription service validates input structure."""
         # Test with empty group_id (should return None, no error)
         inscripcion, error = procesar_inscripcion_webhook(None, {})
-        assert inscripcion is None
-        assert error is None
+        assert inscripcion is None  # nosec B101
+        assert error is None  # nosec B101
 
 
 class TestNormalizacionWebhook:
@@ -59,42 +59,42 @@ class TestNormalizacionWebhook:
 
     def test_a_booleano(self):
         """'Sí'/'No' y variantes se convierten a booleanos reales."""
-        assert _a_booleano('Sí') is True
-        assert _a_booleano('Si') is True
-        assert _a_booleano('TRUE') is True
-        assert _a_booleano(1) is True
-        assert _a_booleano('No') is False
-        assert _a_booleano('') is False
-        assert _a_booleano(None) is False
-        assert _a_booleano(None, por_defecto=True) is True
-        assert _a_booleano('otra cosa') is False
+        assert _a_booleano('Sí') is True  # nosec B101
+        assert _a_booleano('Si') is True  # nosec B101
+        assert _a_booleano('TRUE') is True  # nosec B101
+        assert _a_booleano(1) is True  # nosec B101
+        assert _a_booleano('No') is False  # nosec B101
+        assert _a_booleano('') is False  # nosec B101
+        assert _a_booleano(None) is False  # nosec B101
+        assert _a_booleano(None, por_defecto=True) is True  # nosec B101
+        assert _a_booleano('otra cosa') is False  # nosec B101
 
     def test_a_decimal(self):
         """Acepta formato anglo y latino; vacío/inválido → None."""
-        assert _a_decimal('15500.75') == Decimal('15500.75')
-        assert _a_decimal('15.500,75') == Decimal('15500.75')
-        assert _a_decimal('70,5') == Decimal('70.5')
-        assert _a_decimal('') is None
-        assert _a_decimal(None) is None
-        assert _a_decimal('abc') is None
+        assert _a_decimal('15500.75') == Decimal('15500.75')  # nosec B101
+        assert _a_decimal('15.500,75') == Decimal('15500.75')  # nosec B101
+        assert _a_decimal('70,5') == Decimal('70.5')  # nosec B101
+        assert _a_decimal('') is None  # nosec B101
+        assert _a_decimal(None) is None  # nosec B101
+        assert _a_decimal('abc') is None  # nosec B101
 
     def test_a_entero(self):
         """Convierte strings numéricos a int; vacío/inválido → None."""
-        assert _a_entero('3') == 3
-        assert _a_entero('3.0') == 3
-        assert _a_entero(2) == 2
-        assert _a_entero('') is None
-        assert _a_entero(None) is None
-        assert _a_entero('x') is None
+        assert _a_entero('3') == 3  # nosec B101
+        assert _a_entero('3.0') == 3  # nosec B101
+        assert _a_entero(2) == 2  # nosec B101
+        assert _a_entero('') is None  # nosec B101
+        assert _a_entero(None) is None  # nosec B101
+        assert _a_entero('x') is None  # nosec B101
 
     def test_a_fecha(self):
         """Acepta ISO, dd/mm/yyyy y m/d/yyyy; inválido → None."""
-        assert _a_fecha('2010-05-14') == date(2010, 5, 14)
-        assert _a_fecha('14/05/2010') == date(2010, 5, 14)
-        assert _a_fecha('5/14/2010') == date(2010, 5, 14)
-        assert _a_fecha('') is None
-        assert _a_fecha(None) is None
-        assert _a_fecha('ayer') is None
+        assert _a_fecha('2010-05-14') == date(2010, 5, 14)  # nosec B101
+        assert _a_fecha('14/05/2010') == date(2010, 5, 14)  # nosec B101
+        assert _a_fecha('5/14/2010') == date(2010, 5, 14)  # nosec B101
+        assert _a_fecha('') is None  # nosec B101
+        assert _a_fecha(None) is None  # nosec B101
+        assert _a_fecha('ayer') is None  # nosec B101
 
 
 class TestVinculacionWebhook:
@@ -128,22 +128,22 @@ class TestVinculacionWebhook:
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='19REMOVED_SECRET')
         )
-        assert error is None
-        assert alumno.id_profesor_encargado == profesor
+        assert error is None  # nosec B101
+        assert alumno.id_profesor_encargado == profesor  # nosec B101
 
     def test_profesor_encargado_por_cedula_con_prefijo(self, tablas_legacy):
-        """"V-19REMOVED_SECRET" también matchea (se reducen los dígitos)."""
+        """"V-19555444" también matchea (se reducen los dígitos)."""
         profesor = Profesores.objects.create(
-            cedula='19REMOVED_SECRET',
+            cedula='19555444',
             primer_nombre='María',
             primer_apellido='López',
             categoria='Profesor',
         )
         alumno, error = procesar_alumno_webhook(
-            self._payload(profesor_encargado='V-19REMOVED_SECRET')
+            self._payload(profesor_encargado='V-19555444')
         )
-        assert error is None
-        assert alumno.id_profesor_encargado == profesor
+        assert error is None  # nosec B101
+        assert alumno.id_profesor_encargado == profesor  # nosec B101
 
     def test_profesor_encargado_por_nombre_normalizado(self, tablas_legacy):
         """Matchea por nombre completo sin acentos ni dobles espacios."""
@@ -156,22 +156,22 @@ class TestVinculacionWebhook:
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='jose  muñoz')
         )
-        assert error is None
-        assert alumno.id_profesor_encargado == profesor
+        assert error is None  # nosec B101
+        assert alumno.id_profesor_encargado == profesor  # nosec B101
 
     def test_profesor_encargado_desconocido_no_bloquea(self, tablas_legacy):
         """Si no existe, el alumno se crea igual con FK en None + warning."""
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='Nadie Conocido')
         )
-        assert error is None
-        assert alumno is not None
-        assert alumno.id_profesor_encargado is None
+        assert error is None  # nosec B101
+        assert alumno is not None  # nosec B101
+        assert alumno.id_profesor_encargado is None  # nosec B101
 
     def test_profesor_encargado_ausente(self, tablas_legacy):
         alumno, error = procesar_alumno_webhook(self._payload())
-        assert error is None
-        assert alumno.id_profesor_encargado is None
+        assert error is None  # nosec B101
+        assert alumno.id_profesor_encargado is None  # nosec B101
 
     # --- Representante legal ---
 
@@ -186,55 +186,55 @@ class TestVinculacionWebhook:
                 'ocupacion': 'Docente',
             },
         ))
-        assert error is None
+        assert error is None  # nosec B101
 
         rep = RepresentantesLegales.objects.get(cedula='V-10101010')
-        assert rep.primer_nombre == 'María'
-        assert rep.primer_apellido == 'Perez'
-        assert rep.telefono_principal == '0412-REMOVED_SECRET7'
-        assert rep.email == 'maria@example.com'
+        assert rep.primer_nombre == 'María'  # nosec B101
+        assert rep.primer_apellido == 'Perez'  # nosec B101
+        assert rep.telefono_principal == '0412-REMOVED_SECRET7'  # nosec B101
+        assert rep.email == 'maria@example.com'  # nosec B101
 
         vinculo = AlumnoRepresentante.objects.get(alumno=alumno, representante=rep)
-        assert vinculo.parentesco == 'Madre'
-        assert vinculo.es_principal is True
+        assert vinculo.parentesco == 'Madre'  # nosec B101
+        assert vinculo.es_principal is True  # nosec B101
 
     def test_representante_reutiliza_existente_por_cedula(self, tablas_legacy):
         """No duplica: si la cédula ya existe, se vincula al existente."""
         alumno1, error1 = procesar_alumno_webhook(self._payload(
             representante={'cedula': '15151515', 'nombre': 'Pedro Gómez', 'telefono': '0414-9999999'},
         ))
-        assert error1 is None
-        assert RepresentantesLegales.objects.filter(cedula='15151515').count() == 1
+        assert error1 is None  # nosec B101
+        assert RepresentantesLegales.objects.filter(cedula='15151515').count() == 1  # nosec B101
 
         alumno2, error2 = procesar_alumno_webhook(self._payload(
             numero_documento_identidad='30999888',
             cedula_escolar='CE-REP-002',
             representante={'cedula': '15151515', 'nombre': 'Pedro Gómez', 'telefono': '0414-9999999'},
         ))
-        assert error2 is None
-        assert RepresentantesLegales.objects.filter(cedula='15151515').count() == 1
-        assert AlumnoRepresentante.objects.filter(alumno=alumno1).count() == 1
-        assert AlumnoRepresentante.objects.filter(alumno=alumno2).count() == 1
+        assert error2 is None  # nosec B101
+        assert RepresentantesLegales.objects.filter(cedula='15151515').count() == 1  # nosec B101
+        assert AlumnoRepresentante.objects.filter(alumno=alumno1).count() == 1  # nosec B101
+        assert AlumnoRepresentante.objects.filter(alumno=alumno2).count() == 1  # nosec B101
 
     def test_representante_incompleto_se_ignora(self, tablas_legacy):
         """Sin teléfono → no se crea nada, el alumno se crea igual."""
         alumno, error = procesar_alumno_webhook(self._payload(
             representante={'cedula': '20202020', 'nombre': 'Sin Teléfono'},
         ))
-        assert error is None
-        assert alumno is not None
-        assert RepresentantesLegales.objects.count() == 0
-        assert AlumnoRepresentante.objects.count() == 0
+        assert error is None  # nosec B101
+        assert alumno is not None  # nosec B101
+        assert RepresentantesLegales.objects.count() == 0  # nosec B101
+        assert AlumnoRepresentante.objects.count() == 0  # nosec B101
 
     def test_representante_nombre_de_una_palabra(self, tablas_legacy):
         """Nombre de una sola palabra → primer_apellido obligatorio recibe 'S/I'."""
         alumno, error = procesar_alumno_webhook(self._payload(
             representante={'cedula': '30303030', 'nombre': 'Rosario', 'telefono': '0424-1112233'},
         ))
-        assert error is None
+        assert error is None  # nosec B101
         rep = RepresentantesLegales.objects.get(cedula='30303030')
-        assert rep.primer_nombre == 'Rosario'
-        assert rep.primer_apellido == 'S/I'
-        assert AlumnoRepresentante.objects.get(alumno=alumno).es_principal is True
+        assert rep.primer_nombre == 'Rosario'  # nosec B101
+        assert rep.primer_apellido == 'S/I'  # nosec B101
+        assert AlumnoRepresentante.objects.get(alumno=alumno).es_principal is True  # nosec B101
 
 
