@@ -1,6 +1,8 @@
 import hashlib
+import secrets
 
 from django.db import models
+from django.utils import timezone
 
 
 def generar_nombre_unico_archivo(instance, filename):
@@ -175,3 +177,65 @@ class Asistencias(models.Model):
 
     def __str__(self):
         return f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} - {self.fecha} - {self.get_estado_display()}"
+
+
+class PeriodoInscripcion(models.Model):
+    """
+    Control dinámico del periodo de inscripciones externas.
+
+    La tabla es administrada por Django (managed=True por defecto) y se
+    materializa físicamente en MariaDB como 'periodo_inscripcion'.
+
+    Reglas de negocio:
+    - 'activo_manual' tiene prioridad absoluta sobre el calendario.
+    - 'token_acceso' se autogenera con secrets.token_urlsafe(32) si viene vacío.
+    """
+
+    nombre = models.CharField(
+        max_length=100,
+        default="Inscripciones Año Escolar",
+        db_column='nombre',
+    )
+    fecha_inicio = models.DateTimeField(db_column='fecha_inicio')
+    fecha_fin = models.DateTimeField(db_column='fecha_fin')
+    activo_manual = models.BooleanField(
+        default=True,
+        db_column='activo_manual',
+        help_text="Switch/botón de la interfaz. Prioridad absoluta sobre el calendario.",
+    )
+    token_acceso = models.CharField(
+        max_length=64,
+        unique=True,
+        editable=False,
+        db_column='token_acceso',
+        help_text="Token alfanumérico seguro para URL de acceso público.",
+    )
+
+    class Meta:
+        db_table = 'periodo_inscripcion'
+        verbose_name = 'Periodo de Inscripción'
+        verbose_name_plural = 'Periodos de Inscripción'
+
+    def save(self, *args, **kwargs):
+        if not self.token_acceso:
+            self.token_acceso = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+
+    def esta_disponible(self):
+        """
+        Retorna True si el periodo está abierto para inscripciones.
+
+        Regla estricta:
+        1. Si activo_manual es False -> retorna False inmediatamente
+           (prioridad absoluta del switch manual).
+        2. Si activo_manual es True -> valida que now() esté entre
+           fecha_inicio y fecha_fin.
+        """
+        if not self.activo_manual:
+            return False
+
+        ahora = timezone.now()
+        return self.fecha_inicio <= ahora <= self.fecha_fin
+
+    def __str__(self):
+        return f"PeriodoInscripcion #{self.pk} - {self.nombre}"

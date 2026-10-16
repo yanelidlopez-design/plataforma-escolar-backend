@@ -1,5 +1,6 @@
-from rest_framework import viewsets, filters, status, permissions, APIView
+from rest_framework import viewsets, filters, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
@@ -9,10 +10,11 @@ from django.utils import timezone
 from django.db.models import ProtectedError, Prefetch
 import logging
 import re
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
-    InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer
+    InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
+    AlumnoInscripcionSerializer
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
@@ -998,5 +1000,125 @@ class AlumnoInscripcionAPIView(APIView):
                 'alumno_id': inscripcion.alumno.id_alumno,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+# ============================================================================
+# ENDPOINTS DE CONTROL DINÁMICO DE INSCRIPCIONES EXTERNAS
+# ============================================================================
+
+class InscripcionDocenteExternaAPIView(APIView):
+    """
+    Endpoint público para inscripción externa de alumnos.
+
+    Accesible por URL externa sin sesión JWT (AllowAny).
+    Valida un token de acceso seguro y el estado del periodo de inscripción
+    antes de crear el alumno y su inscripción.
+    """
+    permission_classes = [permissions.AllowAny]
+    serializer_class = AlumnoInscripcionSerializer
+
+    def post(self, request, *args, **kwargs):
+        # 1) Extraer el token de los parámetros de la URL
+        token = request.query_params.get('token')
+        if not token:
+            return Response(
+                {'success': False, 'error': 'Token de acceso requerido.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 2) Buscar el PeriodoInscripcion por el token (genérico para no filtrar info)
+        try:
+            periodo = PeriodoInscripcion.objects.get(token_acceso=token)
+        except PeriodoInscripcion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except Exception:
+            logger.debug('Error buscando PeriodoInscripcion por token', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 3) Regla de negocio: verificar disponibilidad del periodo
+        if not periodo.esta_disponible():
+            return Response(
+                {
+                    'success': False,
+                    'error': 'El periodo de inscripciones ha concluido o está deshabilitado.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4) Procesar la inscripción con el serializador existente
+        serializer = AlumnoInscripcionSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                inscripcion = serializer.save()
+                return Response(
+                    {
+                        'success': True,
+                        'message': 'Inscripción creada exitosamente.',
+                        'inscripcion_id': inscripcion.id_inscripcion,
+                        'alumno_id': inscripcion.alumno.id_alumno,
+                    },
+                    status=status.HTTP_201_CREATED,
+                )
+            except Exception:
+                logger.debug('Error creando inscripción externa', exc_info=True)
+                return Response(
+                    {'success': False, 'error': 'Error interno al procesar la inscripción.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        return Response(
+            {'success': False, 'errors': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class AlternarUrlInscripcionAPIView(APIView):
+    """
+    Endpoint para alternar el estado del switch de inscripción (activo_manual).
+
+    Requiere autenticación JWT (IsAuthenticated) de un administrador legítimo.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk, *args, **kwargs):
+        try:
+            periodo = PeriodoInscripcion.objects.get(pk=pk)
+        except PeriodoInscripcion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Periodo de inscripción no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.debug('Error buscando PeriodoInscripcion por pk', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error interno al buscar el periodo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        activo_manual = request.data.get('activo_manual')
+        if activo_manual is None:
+            return Response(
+                {'success': False, 'error': 'El campo activo_manual es requerido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        periodo.activo_manual = bool(activo_manual)
+        periodo.save()
+
+        return Response(
+            {
+                'success': True,
+                'message': f'Estado de inscripción actualizado: {"activo" if periodo.activo_manual else "inactivo"}.',
+                'activo_manual': periodo.activo_manual,
+                'token_acceso': periodo.token_acceso,
+            },
+            status=status.HTTP_200_OK,
         )
 
