@@ -346,8 +346,8 @@ def crear_datos_prueba():
 
             for alumno in alumnos_lista:
                 # Asignar estado aleatorio con mayor probabilidad de presente
-                import random
-                estado = random.choice(estados)
+                import secrets
+                estado = secrets.choice(estados)
 
                 # Crear registro de asistencia
                 Asistencias.objects.get_or_create(

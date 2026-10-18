@@ -7,7 +7,8 @@ from .views import (
     webhook_google_forms, generar_comprobante_inscripcion_pdf,
     estado_exportacion, descargar_exportacion,
     InscripcionDocenteExternaAPIView, AlternarUrlInscripcionAPIView,
-    PeriodoInscripcionListAPIView,
+    PeriodoInscripcionListCreateAPIView, PeriodoInscripcionDetailAPIView,
+    CargaCalificacionesDocenteExternaAPIView, ConfiguracionPeriodoCalificacionViewSet,
 )
 
 router = DefaultRouter()
@@ -16,6 +17,7 @@ router.register(r'grupos', GruposAcademicosViewSet)
 router.register(r'inscripciones', InscripcionesViewSet)
 router.register(r'calificaciones', CalificacionesViewSet)
 router.register(r'asistencias', AsistenciasViewSet)
+router.register(r'periodos-calificacion', ConfiguracionPeriodoCalificacionViewSet)
 
 urlpatterns = [
     path('webhook-google-forms/', webhook_google_forms, name='webhook_google_forms'),
@@ -24,7 +26,9 @@ urlpatterns = [
     path('asistencias/exportar-excel/', exportar_asistencias_excel, name='exportar_asistencias_excel'),
     path('asistencias/exportar-pdf/', exportar_asistencias_pdf, name='exportar_asistencias_pdf'),
     path('inscripcion-externa/', InscripcionDocenteExternaAPIView.as_view(), name='inscripcion_externa'),
-    path('periodos/', PeriodoInscripcionListAPIView.as_view(), name='listar_periodos'),
+    path('calificaciones/cargar-externa/', CargaCalificacionesDocenteExternaAPIView.as_view(), name='carga_calificaciones_externa'),
+    path('periodos/', PeriodoInscripcionListCreateAPIView.as_view(), name='listar_periodos'),
+    path('periodos/<int:pk>/', PeriodoInscripcionDetailAPIView.as_view(), name='detalle_periodo'),
     path('periodos/<int:pk>/alternar-estado/', AlternarUrlInscripcionAPIView.as_view(), name='alternar_estado_periodo'),
     path('exports/<str:reporte_id>/', estado_exportacion, name='estado_exportacion'),
     path('exports/<str:reporte_id>/descarga/', descargar_exportacion, name='descargar_exportacion'),
