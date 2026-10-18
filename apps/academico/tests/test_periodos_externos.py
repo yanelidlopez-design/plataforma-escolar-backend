@@ -328,3 +328,202 @@ def test_listar_periodos_exitoso(api_client, usuario_admin, periodo_activo, tabl
     assert any(item['id'] == periodo_activo.pk for item in response.data)  # nosec B101
     assert any(item['token_acceso'] == periodo_activo.token_acceso for item in response.data)  # nosec B101
     assert any(item['activo_manual'] is True for item in response.data)  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Creación de periodos (POST /periodos/)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_crear_periodo_sin_autenticacion(api_client, tablas_legacy):
+    """POST a periodos/ sin JWT debe retornar 401 Unauthorized."""
+    url = reverse('listar_periodos')
+    payload = {
+        'nombre': 'Nuevo Periodo',
+        'fecha_inicio': '2026-08-01',
+        'fecha_fin': '2026-12-31',
+    }
+    response = api_client.post(url, payload, format='json')
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED  # nosec B101
+
+
+@pytest.mark.django_db
+def test_crear_periodo_exitoso(api_client, usuario_admin, tablas_legacy):
+    """POST autenticado crea el periodo, autogenera token y persiste en BD."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('listar_periodos')
+    payload = {
+        'nombre': 'Inscripciones 2027',
+        'fecha_inicio': '2027-01-15',
+        'fecha_fin': '2027-03-31',
+        'activo_manual': False,
+    }
+    response = api_client.post(url, payload, format='json')
+
+    assert response.status_code == status.HTTP_201_CREATED  # nosec B101
+    assert response.data['nombre'] == 'Inscripciones 2027'  # nosec B101
+    assert response.data['activo_manual'] is False  # nosec B101
+    # El token_acceso debe venir autogenerado (no vacío).
+    assert response.data['token_acceso']  # nosec B101
+
+    # Verificar persistencia física en la BD
+    periodo = PeriodoInscripcion.objects.get(pk=response.data['id'])
+    assert periodo.nombre == 'Inscripciones 2027'  # nosec B101
+    assert periodo.activo_manual is False  # nosec B101
+
+
+@pytest.mark.django_db
+def test_crear_periodo_fechas_invalidas(api_client, usuario_admin, tablas_legacy):
+    """POST con fecha_fin <= fecha_inicio debe retornar 400 Bad Request."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('listar_periodos')
+    payload = {
+        'nombre': 'Periodo Inválido',
+        'fecha_inicio': '2026-12-31',
+        'fecha_fin': '2026-01-01',
+    }
+    response = api_client.post(url, payload, format='json')
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
+    assert not PeriodoInscripcion.objects.filter(nombre='Periodo Inválido').exists()  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Edición de periodos (PATCH /periodos/<id>/)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_editar_periodo_sin_autenticacion(api_client, periodo_activo, tablas_legacy):
+    """PATCH a periodos/<id>/ sin JWT debe retornar 401 Unauthorized."""
+    url = reverse('detalle_periodo', kwargs={'pk': periodo_activo.pk})
+    response = api_client.patch(url, {'nombre': 'Editado'}, format='json')
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED  # nosec B101
+
+
+@pytest.mark.django_db
+def test_editar_periodo_exitoso(api_client, usuario_admin, periodo_activo, tablas_legacy):
+    """PATCH autenticado actualiza nombre y fechas, y persiste en BD."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('detalle_periodo', kwargs={'pk': periodo_activo.pk})
+    payload = {
+        'nombre': 'Inscripciones Editadas',
+        'fecha_inicio': '2026-11-01',
+        'fecha_fin': '2026-12-20',
+    }
+    response = api_client.patch(url, payload, format='json')
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert response.data['nombre'] == 'Inscripciones Editadas'  # nosec B101
+
+    # Verificar persistencia física en la BD
+    periodo_activo.refresh_from_db()
+    assert periodo_activo.nombre == 'Inscripciones Editadas'  # nosec B101
+    # El token_acceso no debe cambiar al editar
+    assert response.data['token_acceso'] == periodo_activo.token_acceso  # nosec B101
+
+
+@pytest.mark.django_db
+def test_editar_periodo_no_existente(api_client, usuario_admin, tablas_legacy):
+    """PATCH a un pk inexistente debe retornar 404 Not Found."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('detalle_periodo', kwargs={'pk': 99999})
+    response = api_client.patch(url, {'nombre': 'No existe'}, format='json')
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND  # nosec B101
+
+
+@pytest.mark.django_db
+def test_editar_periodo_fechas_invalidas(api_client, usuario_admin, periodo_activo, tablas_legacy):
+    """PATCH con fecha_fin <= fecha_inicio debe retornar 400 y no persistir."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('detalle_periodo', kwargs={'pk': periodo_activo.pk})
+    payload = {
+        'fecha_inicio': '2026-12-31',
+        'fecha_fin': '2026-01-01',
+    }
+    response = api_client.patch(url, payload, format='json')
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
+
+    # El nombre original no debe haber cambiado
+    periodo_activo.refresh_from_db()
+    assert periodo_activo.nombre == 'Inscripciones Año Escolar'  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Eliminación de periodos (DELETE /periodos/<id>/)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_eliminar_periodo_sin_autenticacion(api_client, periodo_activo, tablas_legacy):
+    """DELETE a periodos/<id>/ sin JWT debe retornar 401 Unauthorized."""
+    url = reverse('detalle_periodo', kwargs={'pk': periodo_activo.pk})
+    response = api_client.delete(url)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED  # nosec B101
+    # El periodo no debe haberse eliminado
+    assert PeriodoInscripcion.objects.filter(pk=periodo_activo.pk).exists()  # nosec B101
+
+
+@pytest.mark.django_db
+def test_eliminar_periodo_exitoso(api_client, usuario_admin, periodo_activo, tablas_legacy):
+    """DELETE autenticado elimina el periodo y responde 204 No Content."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('detalle_periodo', kwargs={'pk': periodo_activo.pk})
+    response = api_client.delete(url)
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT  # nosec B101
+    # Verificar que ya no existe en la BD
+    assert not PeriodoInscripcion.objects.filter(pk=periodo_activo.pk).exists()  # nosec B101
+
+
+@pytest.mark.django_db
+def test_eliminar_periodo_no_existente(api_client, usuario_admin, tablas_legacy):
+    """DELETE a un pk inexistente debe retornar 404 Not Found."""
+    api_client.force_authenticate(user=usuario_admin)
+
+    url = reverse('detalle_periodo', kwargs={'pk': 99999})
+    response = api_client.delete(url)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Formulario público de inscripción (GET /inscripcion-externa/)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_formulario_inscripcion_externa_get(api_client, periodo_activo, tablas_legacy, tablas_core_grupo):
+    """GET con token válido devuelve el formulario HTML (200, text/html)."""
+    url = f"{reverse('inscripcion_externa')}?token={periodo_activo.token_acceso}"
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert 'text/html' in response['Content-Type']  # nosec B101
+    assert 'Formulario de Inscripción' in response.content.decode()  # nosec B101
+
+
+@pytest.mark.django_db
+def test_formulario_inscripcion_externa_token_invalido(api_client, tablas_legacy):
+    """GET con token inválido devuelve 403 (no renderiza el formulario)."""
+    url = f"{reverse('inscripcion_externa')}?token=token-falso"
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN  # nosec B101
+
+
+@pytest.mark.django_db
+def test_formulario_inscripcion_externa_periodo_apagado(api_client, periodo_desactivado, tablas_legacy):
+    """GET con periodo inactivo (switch apagado) devuelve 400."""
+    url = f"{reverse('inscripcion_externa')}?token={periodo_desactivado.token_acceso}"
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101

@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inscripción — {{ periodo.nombre }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; padding: 16px; line-height: 1.5; }
+    .card { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 24px 20px; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+    header { text-align: center; margin-bottom: 20px; }
+    header .emoji { font-size: 40px; }
+    header h1 { font-size: 20px; margin-top: 8px; color: #0f172a; }
+    header p { font-size: 13px; color: #64748b; margin-top: 4px; }
+    .periodo-badge { display: inline-block; margin-top: 10px; background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    fieldset { border: none; margin-top: 18px; }
+    legend { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #0369a1; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2px solid #e0f2fe; width: 100%; }
+    .row { display: flex; gap: 10px; }
+    .row3 { display: flex; gap: 10px; }
+    .field { flex: 1; margin-bottom: 12px; }
+    .field.full { flex: 1 1 100%; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    label .req { color: #dc2626; }
+    input, select, textarea { width: 100%; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 15px; color: #0f172a; background: #fff; -webkit-appearance: none; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14,165,233,.15); }
+    textarea { resize: vertical; min-height: 70px; font-family: inherit; }
+    .radios { display: flex; gap: 14px; align-items: center; margin-top: 2px; }
+    .radios label { font-size: 14px; font-weight: 600; color: #334155; margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    .radios input { width: auto; flex: 0 0 auto; }
+    .opcional { color: #64748b; font-weight: 400; font-size: 12px; margin-left: 6px; }
+    .btn-cancelar { width: 100%; margin-top: 8px; padding: 14px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; }
+    .btn-cancelar:active { background: #e2e8f0; }
+    .btn-group { display: flex; gap: 10px; margin-top: 6px; }
+    .btn-group button { flex: 1; }
+    .msg { padding: 12px 14px; border-radius: 10px; font-size: 14px; margin-bottom: 16px; display: none; }
+    .msg.ok { display: block; background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .msg.err { display: block; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .loader { display: none; margin-left: 8px; }
+    .loader.on { display: inline-block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <header>
+      <div class="emoji">📝</div>
+      <h1>Formulario de Inscripción</h1>
+      <p>Complete los datos para inscribir a su representado. Los campos con <span style="color:#dc2626">*</span> son obligatorios.</p>
+      <span class="periodo-badge">{{ periodo.nombre }}</span>
+    </header>
+
+    <div id="msg" class="msg"></div>
+
+    <form id="formInscripcion">
+      <!-- 1. Datos Personales del Alumno -->
+      <fieldset>
+        <legend>Datos Personales del Alumno</legend>
+        <div class="row">
+          <div class="field">
+            <label>Tipo Documento <span class="req">*</span></label>
+            <select name="tipo_documento_identidad" required>
+              <option value="V - Venezolano">V - Venezolano</option>
+              <option value="E - Extranjero">E - Extranjero</option>
+              <option value="P - Pasaporte">P - Pasaporte</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Número Documento <span class="req">*</span></label>
+            <input name="numero_documento_identidad" required maxlength="30">
+          </div>
+        </div>
+        <div class="field full">
+          <label>Cédula Escolar <span class="opcional">(opcional)</span></label>
+          <input name="cedula_escolar" maxlength="30">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Primer Nombre <span class="req">*</span></label>
+            <input name="primer_nombre" required maxlength="150">
+          </div>
+          <div class="field">
+            <label>Segundo Nombre</label>
+            <input name="segundo_nombre" maxlength="150">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Primer Apellido <span class="req">*</span></label>
+            <input name="primer_apellido" required maxlength="150">
+          </div>
+          <div class="field">
+            <label>Segundo Apellido</label>
+            <input name="segundo_apellido" maxlength="150">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Fecha Nacimiento <span class="req">*</span></label>
+            <input type="date" name="fecha_nacimiento" required>
+          </div>
+          <div class="field">
+            <label>Género <span class="req">*</span></label>
+            <select name="genero" required>
+              <option value="Masculino">Masculino</option>
+              <option value="Femenino">Femenino</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Lugar Nacimiento</label>
+            <input name="lugar_nacimiento" maxlength="255">
+          </div>
+          <div class="field">
+            <label>Nacionalidad</label>
+            <input name="nacionalidad" maxlength="100">
+          </div>
+        </div>
+        <div class="row3">
+          <div class="field">
+            <label>Estado Nacimiento</label>
+            <input name="entidad_federal_nacimiento" maxlength="100">
+          </div>
+          <div class="field">
+            <label>Municipio Nacimiento</label>
+            <input name="municipio_nacimiento" maxlength="100">
+          </div>
+          <div class="field">
+            <label>Parroquia Nacimiento</label>
+            <input name="parroquia_nacimiento" maxlength="100">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 2. Medidas y Datos Médicos -->
+      <fieldset>
+        <legend>Medidas y Datos Médicos</legend>
+        <div class="row">
+          <div class="field">
+            <label>Grupo Sanguíneo</label>
+            <select name="grupo_sanguineo">
+              <option value="">Seleccionar...</option>
+              <option value="O+">O+</option>
+              <option value="O-">O-</option>
+              <option value="A+">A+</option>
+              <option value="A-">A-</option>
+              <option value="B+">B+</option>
+              <option value="B-">B-</option>
+              <option value="AB+">AB+</option>
+              <option value="AB-">AB-</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Peso (kg)</label>
+            <input type="number" step="0.01" name="peso_kg" placeholder="Ej: 55.50">
+          </div>
+          <div class="field">
+            <label>Talla (cm)</label>
+            <input type="number" step="0.01" name="talla_cm" placeholder="Ej: 160.5">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Talla Camisa</label>
+            <select name="talla_camisa">
+              <option value="">Seleccionar...</option>
+              <option value="S">S</option>
+              <option value="M">M</option>
+              <option value="L">L</option>
+              <option value="XL">XL</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Talla Pantalón</label>
+            <select name="talla_pantalon">
+              <option value="">Seleccionar...</option>
+              <option value="S">S</option>
+              <option value="M">M</option>
+              <option value="L">L</option>
+              <option value="XL">XL</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Talla Zapato</label>
+            <input type="number" name="talla_zapato" placeholder="Ej: 35">
+          </div>
+        </div>
+        <div class="field full">
+          <label>Alergias</label>
+          <textarea name="alergico_a" placeholder="Describa cualquier alergia conocida..."></textarea>
+        </div>
+        <div class="field full">
+          <label>Tratamiento Médico</label>
+          <textarea name="tratamiento_medico" placeholder="Tratamiento médico actual..."></textarea>
+        </div>
+      </fieldset>
+
+      <!-- 3. Estado de Salud y Apoyo -->
+      <fieldset>
+        <legend>Estado de Salud y Apoyo</legend>
+        <div class="field full">
+          <label>Condición Física</label>
+          <textarea name="condicion_fisica" placeholder="Condición física del alumno..."></textarea>
+        </div>
+        <div class="row">
+          <div class="field full">
+            <label>¿Tiene discapacidad?</label>
+            <div class="radios">
+              <label><input type="radio" name="discapacidad" value="true"> Sí</label>
+              <label><input type="radio" name="discapacidad" value="false" checked> No</label>
+            </div>
+          </div>
+        </div>
+        <div class="field full" id="divTipoDiscapacidad" style="display:none;margin-top:8px;">
+          <label>Tipo de Discapacidad</label>
+          <input name="tipo_discapacidad" maxlength="500">
+        </div>
+        <div class="row">
+          <div class="field full">
+            <label>¿Recibe Apoyo Escolar?</label>
+            <div class="radios">
+              <label><input type="radio" name="apoyo_escolar" value="true"> Sí</label>
+              <label><input type="radio" name="apoyo_escolar" value="false" checked> No</label>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field full">
+            <label>¿Vacunas Completas?</label>
+            <div class="radios">
+              <label><input type="radio" name="vacunas_completas" value="true"> Sí</label>
+              <label><input type="radio" name="vacunas_completas" value="false" checked> No</label>
+            </div>
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 4. Dirección de Residencia -->
+      <fieldset>
+        <legend>Dirección de Residencia</legend>
+        <div class="field full">
+          <label>Calle / Dirección</label>
+          <input name="direccion_calle" placeholder="ej. Urb. Los Rosales, Casa #12">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Ciudad / Municipio</label>
+            <input name="direccion_ciudad" placeholder="ej. Caracas">
+          </div>
+          <div class="field">
+            <label>Estado</label>
+            <input name="direccion_estado" placeholder="ej. Miranda">
+          </div>
+        </div>
+        <div class="field full">
+          <label>Referencia</label>
+          <input name="direccion_referencia" placeholder="Referencia de la dirección...">
+        </div>
+      </fieldset>
+
+      <!-- 5. Datos del Representante Legal -->
+      <fieldset>
+        <legend>Datos del Representante Legal</legend>
+        <div class="row">
+          <div class="field">
+            <label>Cédula <span class="req">*</span></label>
+            <input name="rep_cedula" required maxlength="20">
+          </div>
+          <div class="field">
+            <label>Teléfono <span class="req">*</span></label>
+            <input name="rep_telefono" required maxlength="20">
+          </div>
+        </div>
+        <div class="field full">
+          <label>Nombre Completo <span class="req">*</span></label>
+          <input name="rep_nombre" required maxlength="200">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Parentesco</label>
+            <select name="parentesco">
+              <option value="Padre">Padre</option>
+              <option value="Madre">Madre</option>
+              <option value="Representante">Representante</option>
+              <option value="Abuelo/a">Abuelo/a</option>
+              <option value="Tío/a">Tío/a</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Correo Electrónico</label>
+            <input type="email" name="rep_correo" maxlength="254">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 6. Datos Familiares -->
+      <fieldset>
+        <legend>Datos Familiares</legend>
+        <div class="row">
+          <div class="field">
+            <label>Estado Civil Padres</label>
+            <select name="estado_civil_padres">
+              <option value="">Seleccionar...</option>
+              <option value="Casados">Casados</option>
+              <option value="Divorciados">Divorciados</option>
+              <option value="Solteros">Solteros</option>
+              <option value="Viudos">Viudos</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Tipo Vivienda</label>
+            <select name="tipo_vivienda">
+              <option value="">Seleccionar...</option>
+              <option value="Propia">Propia</option>
+              <option value="Alquilada">Alquilada</option>
+              <option value="Familiar">Familiar</option>
+              <option value="Otro">Otro</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Ingreso Familiar (Bs.)</label>
+            <input type="number" step="0.01" name="ingreso_familiar" placeholder="ej. 15000">
+          </div>
+          <div class="field">
+            <label>Profesión Madre</label>
+            <input name="profesion_madre" placeholder="ej. Enfermera">
+          </div>
+          <div class="field">
+            <label>Profesión Padre</label>
+            <input name="profesion_padre" placeholder="ej. Chófer">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Nº de Hermanos</label>
+            <input type="number" name="numero_hermanos" placeholder="ej. 2">
+          </div>
+          <div class="field">
+            <label>Nº Hermanos en el Plantel</label>
+            <input type="number" name="numero_en_el_planter" placeholder="ej. 1">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 7. Carnet de la Patria -->
+      <fieldset>
+        <legend>Carnet de la Patria</legend>
+        <div class="row">
+          <div class="field">
+            <label>Código</label>
+            <input name="carnet_patria_codigo" maxlength="50" placeholder="ej. 1234567890123456">
+          </div>
+          <div class="field">
+            <label>Serial</label>
+            <input name="carnet_patria_serial" maxlength="50" placeholder="ej. ABC123456">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 8. Registros Financieros -->
+      <fieldset>
+        <legend>Registros Financieros</legend>
+        <div class="row">
+          <div class="field">
+            <label>Nº de Cuenta</label>
+            <input name="numero_cuenta" maxlength="30" placeholder="ej. 01340123456789012345">
+          </div>
+          <div class="field">
+            <label>Tipo de Cuenta</label>
+            <select name="tipo_cuenta">
+              <option value="">Seleccionar...</option>
+              <option value="Corriente">Corriente</option>
+              <option value="Ahorro">Ahorro</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Banco</label>
+            <input name="banco" maxlength="100" placeholder="ej. Banco de Venezuela">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- 9. Grupo y Docente Encargado -->
+      <fieldset>
+        <legend>Grupo y Docente Encargado</legend>
+        <div class="field full">
+          <label>Grupo Académico <span class="req">*</span></label>
+          <select name="id_grupo" required>
+            <option value="">Seleccionar grupo...</option>
+            {% for g in grupos %}
+            <option value="{{ g.id }}">{{ g.etiqueta }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field full">
+          <label>Profesor Encargado</label>
+          <select name="profesor_encargado" disabled>
+            <option value="">Primero seleccione un grupo...</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <!-- 10. Detalles de la Inscripción -->
+      <fieldset>
+        <legend>Detalles de la Inscripción</legend>
+        <div class="row">
+          <div class="field">
+            <label>Fecha Inscripción</label>
+            <input type="date" name="fecha_inscripcion">
+          </div>
+          <div class="field">
+            <label>Estado</label>
+            <select name="estado_inscripcion">
+              <option value="Activa">Activa</option>
+              <option value="Inactiva">Inactiva</option>
+              <option value="Pendiente">Pendiente</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Monto Pago</label>
+            <input type="number" step="0.01" name="monto_pago" placeholder="0.00">
+          </div>
+          <div class="field">
+            <label>Referencia Bancaria</label>
+            <input name="referencia_bancaria" maxlength="100" placeholder="BOD-2024-XXX">
+          </div>
+        </div>
+      </fieldset>
+
+      <div class="btn-group">
+        <button type="button" class="btn-cancelar" onclick="location.href = location.pathname + '?token=' + encodeURIComponent('{{ token }}')">Cancelar</button>
+        <button type="submit" id="btnEnviar">Guardar inscripción <span id="loader" class="loader">⏳</span></button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('formInscripcion');
+      var btn = document.getElementById('btnEnviar');
+      var loader = document.getElementById('loader');
+      var msgBox = document.getElementById('msg');
+      var tipoDiscapacidad = document.getElementById('divTipoDiscapacidad');
+      var token = new URLSearchParams(location.search).get('token') || '{{ token }}';
+
+      // Mostrar/ocultar campo tipo discapacidad según la radio.
+      form.querySelectorAll('input[name="discapacidad"]').forEach(function (r) {
+        r.addEventListener('change', function () {
+          tipoDiscapacidad.style.display = r.value === 'true' ? 'block' : 'none';
+          if (r.value !== 'true') r.form.elements['tipo_discapacidad'].value = '';
+        });
+      });
+
+      function mostrar(tipo, texto) {
+        msgBox.className = 'msg ' + tipo;
+        msgBox.textContent = texto;
+        msgBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function nuloSiVacio(v) { return v === '' || v === null ? null : v; }
+      function numSiVacio(v) { return v === '' ? null : v; }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var d = new FormData(form);
+
+        var direccion = {
+          calle: nuloSiVacio(d.get('direccion_calle')),
+          ciudad: nuloSiVacio(d.get('direccion_ciudad')),
+          estado: nuloSiVacio(d.get('direccion_estado')),
+          referencia: nuloSiVacio(d.get('direccion_referencia'))
+        };
+        // Si la dirección viene completamente vacía, no la enviamos.
+        if (Object.values(direccion).every(function (x) { return x === null; })) direccion = null;
+
+        var representante = {
+          cedula: d.get('rep_cedula'),
+          nombre: d.get('rep_nombre'),
+          apellido: d.get('rep_apellido') || '',
+          telefono: d.get('rep_telefono'),
+          correo: nuloSiVacio(d.get('rep_correo'))
+        };
+
+        var discapacidad = d.get('discapacidad') === 'true';
+        var apoyoEscolar = d.get('apoyo_escolar') === 'true';
+        var vacunasCompletas = d.get('vacunas_completas') === 'true';
+
+        var payload = {
+          // Datos personales del alumno
+          tipo_documento_identidad: d.get('tipo_documento_identidad'),
+          numero_documento_identidad: d.get('numero_documento_identidad'),
+          cedula_escolar: nuloSiVacio(d.get('cedula_escolar')),
+          primer_nombre: d.get('primer_nombre'),
+          segundo_nombre: nuloSiVacio(d.get('segundo_nombre')),
+          primer_apellido: d.get('primer_apellido'),
+          segundo_apellido: nuloSiVacio(d.get('segundo_apellido')),
+          fecha_nacimiento: d.get('fecha_nacimiento'),
+          genero: d.get('genero'),
+          lugar_nacimiento: nuloSiVacio(d.get('lugar_nacimiento')),
+          nacionalidad: nuloSiVacio(d.get('nacionalidad')),
+          entidad_federal_nacimiento: nuloSiVacio(d.get('entidad_federal_nacimiento')),
+          municipio_nacimiento: nuloSiVacio(d.get('municipio_nacimiento')),
+          parroquia_nacimiento: nuloSiVacio(d.get('parroquia_nacimiento')),
+          // Datos médicos
+          condicion_fisica: nuloSiVacio(d.get('condicion_fisica')),
+          grupo_sanguineo: nuloSiVacio(d.get('grupo_sanguineo')),
+          peso_kg: numSiVacio(d.get('peso_kg')),
+          talla_cm: numSiVacio(d.get('talla_cm')),
+          talla_camisa: nuloSiVacio(d.get('talla_camisa')),
+          talla_pantalon: nuloSiVacio(d.get('talla_pantalon')),
+          talla_zapato: nuloSiVacio(d.get('talla_zapato')),
+          alergico_a: nuloSiVacio(d.get('alergico_a')),
+          tratamiento_medico: nuloSiVacio(d.get('tratamiento_medico')),
+          discapacidad: discapacidad,
+          tipo_discapacidad: discapacidad ? nuloSiVacio(d.get('tipo_discapacidad')) : null,
+          apoyo_escolar: apoyoEscolar,
+          vacunas_completas: vacunasCompletas,
+          observaciones: nuloSiVacio(d.get('observaciones')),
+          // Carnet patria y financiero
+          carnet_patria_codigo: nuloSiVacio(d.get('carnet_patria_codigo')),
+          carnet_patria_serial: nuloSiVacio(d.get('carnet_patria_serial')),
+          numero_cuenta: nuloSiVacio(d.get('numero_cuenta')),
+          tipo_cuenta: nuloSiVacio(d.get('tipo_cuenta')),
+          banco: nuloSiVacio(d.get('banco')),
+          // Familiares
+          estado_civil_padres: nuloSiVacio(d.get('estado_civil_padres')),
+          tipo_vivienda: nuloSiVacio(d.get('tipo_vivienda')),
+          ingreso_familiar: numSiVacio(d.get('ingreso_familiar')),
+          profesion_madre: nuloSiVacio(d.get('profesion_madre')),
+          profesion_padre: nuloSiVacio(d.get('profesion_padre')),
+          numero_hermanos: numSiVacio(d.get('numero_hermanos')),
+          numero_en_el_planter: numSiVacio(d.get('numero_en_el_planter')),
+          // Dirección y representante (anidados)
+          direccion: direccion,
+          representante: representante,
+          parentesco: d.get('parentesco') || 'Padre',
+          // Inscripción
+          id_grupo: parseInt(d.get('id_grupo'), 10),
+          profesor_encargado: null,
+          fecha_inscripcion: d.get('fecha_inscripcion') ? d.get('fecha_inscripcion') + 'T09:00:00' : null,
+          estado_inscripcion: nuloSiVacio(d.get('estado_inscripcion')) || 'Activa',
+          monto_pago: numSiVacio(d.get('monto_pago')),
+          referencia_bancaria: nuloSiVacio(d.get('referencia_bancaria'))
+        };
+
+        btn.disabled = true;
+        loader.classList.add('on');
+        msgBox.style.display = 'none';
+
+        fetch('/api/academico/inscripcion-externa/?token=' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+          .then(function (res) {
+            if (res.ok && res.body.success) {
+              form.reset();
+              mostrar('ok', '✅ ' + (res.body.message || 'Inscripción registrada exitosamente.'));
+            } else {
+              var detalle = res.body.error || res.body.errors || 'Revisa los datos ingresados.';
+              mostrar('err', '⚠️ ' + (typeof detalle === 'string' ? detalle : JSON.stringify(detalle)));
+            }
+          })
+          .catch(function () {
+            mostrar('err', '⚠️ No se pudo conectar con el servidor. Verifica tu conexión e inténtalo de nuevo.');
+          })
+          .finally(function () {
+            btn.disabled = false;
+            loader.classList.remove('on');
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

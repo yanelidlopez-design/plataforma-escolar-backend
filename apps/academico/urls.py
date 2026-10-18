@@ -8,7 +8,7 @@ from .views import (
     estado_exportacion, descargar_exportacion,
     InscripcionDocenteExternaAPIView, AlternarUrlInscripcionAPIView,
     PeriodoInscripcionListCreateAPIView, PeriodoInscripcionDetailAPIView,
-    CargaCalificacionesDocenteExternaAPIView, ConfiguracionPeriodoCalificacionViewSet,
+    CargaCalificacionesDocenteExternaAPIView, CargaCriteriosDocenteExternaAPIView, ConfiguracionPeriodoCalificacionViewSet,
 )
 
 router = DefaultRouter()
@@ -27,6 +27,7 @@ urlpatterns = [
     path('asistencias/exportar-pdf/', exportar_asistencias_pdf, name='exportar_asistencias_pdf'),
     path('inscripcion-externa/', InscripcionDocenteExternaAPIView.as_view(), name='inscripcion_externa'),
     path('calificaciones/cargar-externa/', CargaCalificacionesDocenteExternaAPIView.as_view(), name='carga_calificaciones_externa'),
+    path('calificaciones/cargar-criterios-externa/', CargaCriteriosDocenteExternaAPIView.as_view(), name='carga_criterios_externa'),
     path('periodos/', PeriodoInscripcionListCreateAPIView.as_view(), name='listar_periodos'),
     path('periodos/<int:pk>/', PeriodoInscripcionDetailAPIView.as_view(), name='detalle_periodo'),
     path('periodos/<int:pk>/alternar-estado/', AlternarUrlInscripcionAPIView.as_view(), name='alternar_estado_periodo'),

@@ -22,6 +22,7 @@ from .serializers import (
     PeriodoInscripcionSerializer,
     PeriodoCalificacionSerializer,
     CargaMasivaCalificacionesSerializer,
+    CargaMasivaCriteriosSerializer,
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
@@ -1386,6 +1387,113 @@ class CargaCalificacionesDocenteExternaAPIView(APIView):
             logger.debug('Error inesperado guardando lote de calificaciones', exc_info=True)
             return Response(
                 {'success': False, 'error': 'No se pudieron guardar las calificaciones.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({'success': True, **resumen}, status=status.HTTP_200_OK)
+
+
+class CargaCriteriosDocenteExternaAPIView(APIView):
+    """
+    Endpoint público para la carga masiva de criterios cualitativos por los
+    docentes (sección completa de alumnos).
+
+    - POST /api/academico/calificaciones/cargar-criterios-externa/?token=...
+
+    Accesible por URL externa sin sesión JWT (AllowAny). Valida el token del
+    lapso y que el periodo esté abierto (esta_abierto(): switch manual +
+    fecha límite) antes de persistir con guardar_lote_criterios(), que
+    garantiza atomicidad (rollback total) e idempotencia (update_or_create).
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = CargaMasivaCriteriosSerializer
+
+    @swagger_auto_schema(
+        tags=['Calificaciones'],
+        operation_summary='Carga masiva de criterios cualitativos por sección (docente externo)',
+        operation_description='Recibe el lote de evaluaciones de criterios '
+                              'cualitativos de una sección para un lapso '
+                              'abierto y lo persiste de forma atómica e '
+                              'idempotente. Acceso por token en la URL sin '
+                              'sesión JWT.',
+        manual_parameters=[
+            openapi.Parameter(
+                'token', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description='Token seguro del periodo de calificación.',
+            ),
+        ],
+        request_body=CargaMasivaCriteriosSerializer,
+        responses={
+            200: openapi.Response('Lote guardado (desglose creadas/actualizadas)'),
+            400: openapi.Response('Periodo cerrado, datos inválidos o reglas de negocio'),
+            403: openapi.Response('Token ausente o inválido'),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        # 1) Token de acceso en los query params de la URL.
+        token = request.query_params.get('token')
+        if not token:
+            return Response(
+                {'success': False, 'error': 'Token de acceso requerido.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 2) Periodo de calificación correspondiente al token.
+        try:
+            periodo = PeriodoCalificacion.objects.get(token_acceso=token)
+        except PeriodoCalificacion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except Exception:
+            logger.debug('Error buscando PeriodoCalificacion por token (criterios)', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 3) Regla estricta: el lapso debe estar abierto (switch manual y
+        #    fecha límite de carga de notas).
+        if not periodo.esta_abierto():
+            return Response(
+                {'success': False,
+                 'error': 'El periodo de carga de notas ha concluido o está cerrado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4) Validación sintáctica del lote de criterios.
+        serializer = self.serializer_class(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'error': 'Datos inválidos.', 'details': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 5) Persistencia atómica e idempotente del lote de criterios.
+        try:
+            resumen = serializer.guardar_lote_criterios(periodo_objeto=periodo)
+        except ValidationError as exc:
+            # El rollback total y la auditoría (logger.debug) ya ocurrieron
+            # dentro de guardar_lote_criterios(); aquí se traduce a respuesta 400.
+            detalle = exc.message_dict if hasattr(exc, 'message_dict') else exc.messages
+            return Response(
+                {'success': False,
+                 'error': 'Una o más evaluaciones incumplen las reglas de calificación; no se guardó ninguna.',
+                 'details': detalle},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except IntegrityError:
+            logger.debug('Error de integridad guardando lote de criterios', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'El lote referencia alumnos, criterios o grupos inexistentes.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            logger.debug('Error inesperado guardando lote de criterios', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'No se pudieron guardar las evaluaciones de criterios.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

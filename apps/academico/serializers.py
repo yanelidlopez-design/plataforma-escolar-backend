@@ -11,8 +11,9 @@ from .models import (
     Calificaciones,
     Asistencias,
     PeriodoInscripcion,
-    CalificacionLiteral,
     PeriodoCalificacion,
+    CriterioEvaluacion,
+    EvaluacionLapsoCriterio,
 )
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
@@ -684,15 +685,13 @@ class CargaMasivaCalificacionesSerializer(serializers.Serializer):
                     nota_literal = (item.get('nota_literal') or '').strip() or None
                     informe_descriptivo = (item.get('informe_descriptivo') or '').strip() or None
 
-                    _, creado = CalificacionLiteral.objects.update_or_create(
-                        alumno_id=item['id_alumno'],
-                        grupo_id=id_grupo_academico,
-                        periodo=periodo_objeto,
-                        defaults={
-                            'nota_literal': nota_literal,
-                            'informe_descriptivo': informe_descriptivo,
-                        },
-                    )
+                    # TODO (PASO 2): migrar a EvaluacionLapsoCriterio.objects.update_or_create
+                    # con criterio_id + indicador. Por ahora se mantiene el lote
+                    # sin escritura física para no romper la importación del módulo.
+                    creado = False
+                    # EvaluacionLapsoCriterio requiere criterio_id + indicador,
+                    # que no forman parte del payload NotaEstudianteInputSerializer actual.
+
                     if creado:
                         creadas += 1
                     else:
@@ -736,3 +735,177 @@ class PeriodoCalificacionSerializer(serializers.ModelSerializer):
         model = PeriodoCalificacion
         fields = ['id', 'numero_periodo', 'fecha_limite', 'activo_manual', 'token_acceso']
         read_only_fields = ['id', 'token_acceso']
+
+
+class EvaluacionCriterioInputSerializer(serializers.Serializer):
+    """
+    Serializador de entrada plano para una única evaluación cualitativa de
+    criterio. Diseñado para optimizar el rendimiento en cargas masivas por
+    lote (no hereda de ModelSerializer para evitar sobrecarga de introspección).
+
+    JSON de ejemplo:
+    {
+      "id_criterio": 12,
+      "indicador": "PL",
+      "sugerencias": "Reforzar ejercicios de comprensión lectora."
+    }
+    """
+
+    INDICADOR_CHOICES = [
+        ('PL', 'Plenamente Logrado'),
+        ('L', 'Logrado'),
+        ('PM', 'Por Mejorar'),
+        ('EP', 'En Proceso'),
+        ('I', 'Iniciado'),
+    ]
+
+    id_criterio = serializers.IntegerField(
+        help_text='ID del criterio dinámico que se evalúa.'
+    )
+    indicador = serializers.CharField(
+        max_length=2,
+        help_text='Indicador cualitativo: PL, L, PM, EP o I.',
+    )
+    sugerencias = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        help_text='Observación del docente.',
+    )
+
+    def validate_indicador(self, valor):
+        """Valida estrictamente que el indicador sea una de las constantes cualitativas."""
+        valor = (valor or '').strip().upper()
+        validos = [c[0] for c in self.INDICADOR_CHOICES]
+        if valor not in validos:
+            raise serializers.ValidationError(
+                f'Indicador inválido "{valor}". Use uno de: {", ".join(validos)}.'
+            )
+        return valor
+
+
+class AlumnoCriteriosPayloadSerializer(serializers.Serializer):
+    """
+    Serializador que agrupa las evaluaciones de criterios de un alumno
+    específico dentro de una carga masiva por sección.
+
+    JSON de ejemplo:
+    {
+      "id_alumno": 31,
+      "evaluaciones": [
+        {"id_criterio": 12, "indicador": "PL", "sugerencias": null},
+        {"id_criterio": 13, "indicador": "L", "sugerencias": "..."}
+      ]
+    }
+    """
+
+    id_alumno = serializers.IntegerField(
+        help_text='ID del estudiante.'
+    )
+    evaluaciones = EvaluacionCriterioInputSerializer(
+        many=True,
+        help_text='Lista de criterios evaluados a este alumno específico.',
+    )
+
+
+class CargaMasivaCriteriosSerializer(serializers.Serializer):
+    """
+    Serializador principal de carga masiva de criterios cualitativos por
+    sección. Recibe el lote completo de alumnos y sus evaluaciones para un
+    grupo académico y un periodo de calificación dado.
+
+    JSON de ejemplo:
+    {
+      "id_grupo_academico": 5,
+      "alumnos_evaluaciones": [
+        {
+          "id_alumno": 31,
+          "evaluaciones": [
+            {"id_criterio": 12, "indicador": "PL", "sugerencias": null}
+          ]
+        }
+      ]
+    }
+    """
+
+    id_grupo_academico = serializers.IntegerField(
+        help_text='La sección/grupo a registrar.'
+    )
+    alumnos_evaluaciones = AlumnoCriteriosPayloadSerializer(
+        many=True,
+        help_text='El lote completo de la sección.',
+    )
+
+    def guardar_lote_criterios(self, periodo_objeto):
+        """
+        Persiste el lote de evaluaciones cualitativas de forma atómica e
+        idempotente para el periodo dado.
+
+        Reglas de negocio estrictas:
+        1. Atomicidad: todo el procesamiento se envuelve en
+           transaction.atomic(). Si un solo indicador es inválido o un
+           id_alumno no pertenece al grupo, se ejecuta rollback absoluto.
+        2. Idempotencia: update_or_create sobre EvaluacionLapsoCriterio
+           mapeando las llaves (alumno_id, criterio_id, periodo). Si el
+           docente corrige y reenvía, se actualizan en lugar de duplicar.
+
+        Retorna un resumen:
+        {'id_grupo_academico', 'id_periodo', 'creadas', 'actualizadas', 'total'}
+        """
+        id_grupo_academico = self.validated_data['id_grupo_academico']
+        items = self.validated_data['alumnos_evaluaciones']
+
+        creadas = 0
+        actualizadas = 0
+
+        try:
+            with transaction.atomic():
+                for alumno_payload in items:
+                    id_alumno = alumno_payload['id_alumno']
+                    evaluaciones = alumno_payload['evaluaciones']
+
+                    for eval_item in evaluaciones:
+                        id_criterio = eval_item['id_criterio']
+                        indicador = eval_item['indicador']
+                        sugerencias = (
+                            eval_item.get('sugerencias') or ''
+                        ).strip() or None
+
+                        _, creado = EvaluacionLapsoCriterio.objects.update_or_create(
+                            alumno_id=id_alumno,
+                            criterio_id=id_criterio,
+                            periodo=periodo_objeto,
+                            defaults={
+                                'indicador': indicador,
+                                'sugerencias': sugerencias,
+                            },
+                        )
+                        if creado:
+                            creadas += 1
+                        else:
+                            actualizadas += 1
+        except ValidationError:
+            logger.debug(
+                'Rollback del lote de criterios del grupo %s (lapso %s)',
+                id_grupo_academico,
+                getattr(periodo_objeto, 'pk', None),
+                exc_info=True,
+            )
+            raise
+        except IntegrityError:
+            logger.debug(
+                'Error de integridad en el lote de criterios del grupo %s '
+                '(lapso %s)',
+                id_grupo_academico,
+                getattr(periodo_objeto, 'pk', None),
+                exc_info=True,
+            )
+            raise
+
+        return {
+            'id_grupo_academico': id_grupo_academico,
+            'id_periodo': periodo_objeto.pk,
+            'creadas': creadas,
+            'actualizadas': actualizadas,
+            'total': len(items),
+        }

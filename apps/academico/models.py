@@ -313,127 +313,135 @@ class PeriodoCalificacion(models.Model):
         return f"PeriodoCalificacion #{self.pk} - {self.get_numero_periodo_display()}"
 
 
-class CalificacionLiteral(models.Model):
-    """
-    Nota literal (A-E) o informe descriptivo por alumno, grupo y lapso.
 
-    Reglas pedagógicas (validadas en clean() y ejecutadas siempre desde save()
-    mediante self.full_clean()):
-    - Inicial/Preescolar: se prohíbe la 'nota_literal' y el
-      'informe_descriptivo' es obligatorio.
-    - Primaria (1ro a 6to grado): la 'nota_literal' (A-E) es obligatoria y el
-      'informe_descriptivo' es opcional.
-    - La 'nota_literal' se normaliza a mayúscula antes de persistir.
+
+class CriterioEvaluacion(models.Model):
+    """
+    Criterio cualitativo dinámico que cada docente agrega a su grupo/materia.
+    Sin límite fijo de criterios por grupo.
     """
 
-    alumno = models.ForeignKey(Alumnos, on_delete=models.CASCADE, db_column='id_alumno')
-    grupo = models.ForeignKey(GruposAcademicos, on_delete=models.CASCADE, db_column='id_grupo_academico')
-    periodo = models.ForeignKey(PeriodoCalificacion, on_delete=models.PROTECT, db_column='id_periodo')
-    nota_literal = models.CharField(
-        max_length=1,
-        blank=True,
-        null=True,
-        db_column='nota_literal',
-        validators=[
-            RegexValidator(
-                regex=r'^[A-Ea-e]$',
-                message="La nota literal debe ser una letra de la A a la E (mayúscula o minúscula).",
-            ),
-        ],
-        help_text="Literal A-E (Primaria). Debe ir vacío en Inicial/Preescolar.",
+    grupo = models.ForeignKey(
+        GruposAcademicos,
+        on_delete=models.CASCADE,
+        db_column='id_grupo_academico',
     )
-    informe_descriptivo = models.TextField(
-        blank=True,
-        null=True,
-        db_column='informe_descriptivo',
-        help_text="Relato del desarrollo del estudiante; obligatorio en Inicial/Preescolar.",
+    materia_nombre = models.CharField(
+        max_length=100,
+        db_column='materia_nombre',
+        help_text='Ej: Matemática, Lengua, etc.',
     )
-    fecha_registro = models.DateTimeField(auto_now_add=True, db_column='fecha_registro')
+    descripcion_criterio = models.CharField(
+        max_length=255,
+        db_column='descripcion_criterio',
+        help_text='Ej: "Muestra fluidez en la lectura comprensiva".',
+    )
 
     class Meta:
-        db_table = 'calificacion_literal'
-        verbose_name = 'Calificación Literal'
-        verbose_name_plural = 'Calificaciones Literales'
-        unique_together = ('alumno', 'grupo', 'periodo')
-
-    def clean(self):
-        super().clean()
-
-        # Normaliza la nota a mayúscula antes de validar las reglas de negocio
-        # (full_clean() invoca clean_fields() antes que clean(), por eso el
-        # RegexValidator acepta A-E en ambos casos).
-        if self.nota_literal:
-            self.nota_literal = self.nota_literal.strip().upper() or None
-
-        # Determina el nivel pedagógico del grupo (nivel puede ser NULL en la
-        # tabla legacy, por eso se respalda la detección con el nombre del grado).
-        nivel_nombre = ''
-        grado_nombre = ''
-        if self.grupo_id is not None:
-            try:
-                grupo = self.grupo
-            except GruposAcademicos.DoesNotExist:
-                grupo = None
-            if grupo is not None:
-                nivel_nombre = (grupo.nivel.nombre_nivel or '') if grupo.nivel_id else ''
-                grado_nombre = (grupo.grado.nombre_grado or '') if grupo.grado_id else ''
-
-        nombre_nivel = nivel_nombre.upper()
-        nombre_grado = grado_nombre.upper()
-
-        es_inicial = (
-            'INICIAL' in nombre_nivel
-            or 'PREESCOLAR' in nombre_nivel
-            or 'INICIAL' in nombre_grado
-        )
-        grados_primaria = (
-            'PRIMER GRADO', 'SEGUNDO GRADO', 'TERCER GRADO',
-            'CUARTO GRADO', 'QUINTO GRADO', 'SEXTO GRADO',
-        )
-        es_primaria = 'PRIMARIA' in nombre_nivel or any(g in nombre_grado for g in grados_primaria)
-
-        if es_inicial:
-            errores = {}
-            if self.nota_literal:
-                errores['nota_literal'] = (
-                    'En Inicial/Preescolar no se asigna nota literal (A-E); '
-                    'registre únicamente el informe descriptivo.'
-                )
-            if not self.informe_descriptivo or not self.informe_descriptivo.strip():
-                errores['informe_descriptivo'] = (
-                    'En Inicial/Preescolar el informe descriptivo es obligatorio.'
-                )
-            if errores:
-                raise ValidationError(errores)
-        elif es_primaria:
-            if not self.nota_literal:
-                raise ValidationError({
-                    'nota_literal': (
-                        'En Primaria (1ro a 6to grado) la nota literal (A-E) es obligatoria.'
-                    ),
-                })
-
-    def save(self, *args, **kwargs):
-        # La nota se persiste siempre en mayúscula (A-E).
-        if self.nota_literal is not None:
-            self.nota_literal = self.nota_literal.strip().upper() or None
-        # fecha_registro se setea antes de validar para que full_clean() no lo
-        # vea vacío (auto_now_add lo fijará igual en pre_save).
-        if self.fecha_registro is None:
-            self.fecha_registro = timezone.now()
-        # Las reglas pedagógicas y los validadores de campo se ejecutan SIEMPRE.
-        self.full_clean()
-        super().save(*args, **kwargs)
+        db_table = 'criterio_evaluacion'
+        verbose_name = 'Criterio de Evaluación'
+        verbose_name_plural = 'Criterios de Evaluación'
 
     def __str__(self):
-        if self.nota_literal:
-            return (
-                f"CalificaciónLiteral {self.nota_literal} - "
-                f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} "
-                f"(Periodo {self.periodo.numero_periodo})"
-            )
+        return f"{self.materia_nombre} - {self.descripcion_criterio[:50]}"
+
+
+class EvaluacionLapsoCriterio(models.Model):
+    """
+    Resultado cualitativo por alumno, criterio y lapso.
+    Almacena el indicador (PL/L/PM/EP/I) y sugerencias del docente.
+    """
+
+    INDICADOR_CHOICES = [
+        ('PL', 'Plenamente Logrado'),
+        ('L', 'Logrado'),
+        ('PM', 'Por Mejorar'),
+        ('EP', 'En Proceso'),
+        ('I', 'Iniciado'),
+    ]
+
+    alumno = models.ForeignKey(
+        Alumnos,
+        on_delete=models.CASCADE,
+        db_column='id_alumno',
+    )
+    criterio = models.ForeignKey(
+        'CriterioEvaluacion',
+        on_delete=models.CASCADE,
+        db_column='id_criterio',
+    )
+    periodo = models.ForeignKey(
+        PeriodoCalificacion,
+        on_delete=models.PROTECT,
+        db_column='id_periodo',
+    )
+    indicador = models.CharField(
+        max_length=2,
+        db_column='indicador',
+        choices=INDICADOR_CHOICES,
+    )
+    sugerencias = models.TextField(
+        blank=True,
+        null=True,
+        db_column='sugerencias',
+        help_text='Sugerencias del docente para el informe.',
+    )
+
+    class Meta:
+        db_table = 'evaluacion_lapso_criterio'
+        verbose_name = 'Evaluación de Lapso por Criterio'
+        verbose_name_plural = 'Evaluaciones de Lapso por Criterio'
+        unique_together = ('alumno', 'criterio', 'periodo')
+
+    def __str__(self):
         return (
-            f"CalificaciónLiteral (informe) - "
-            f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} "
-            f"(Periodo {self.periodo.numero_periodo})"
+            f"{self.alumno} - {self.criterio} - "
+            f"Periodo {self.periodo.numero_periodo} ({self.get_indicador_display()})"
         )
+
+
+class ConstanciaProsecucionFinal(models.Model):
+    """
+    Boleta oficial única de Julio emitida por administración.
+    Una constancia por alumno y periodo escolar.
+    """
+
+    alumno = models.ForeignKey(
+        Alumnos,
+        on_delete=models.CASCADE,
+        db_column='id_alumno',
+    )
+    periodo_escolar = models.CharField(
+        max_length=9,
+        db_column='periodo_escolar',
+        help_text='Ej: "2025-2026".',
+    )
+    literal_final = models.CharField(
+        max_length=1,
+        db_column='literal_final',
+        validators=[
+            RegexValidator(
+                regex=r'^[A-E]$',
+                message='El literal final debe ser una letra de la A a la E (mayúscula).',
+            ),
+        ],
+        help_text='Letra final A-E.',
+    )
+    promovido_al_grado = models.CharField(
+        max_length=50,
+        db_column='promovido_al_grado',
+        help_text='Ej: "Tercer Grado".',
+    )
+    fecha_expedicion = models.DateField(
+        auto_now_add=True,
+        db_column='fecha_expedicion',
+    )
+
+    class Meta:
+        db_table = 'constancia_prosecucion_final'
+        verbose_name = 'Constancia de Prosecución Final'
+        verbose_name_plural = 'Constancias de Prosecución Final'
+        unique_together = ('alumno', 'periodo_escolar')
+
+    def __str__(self):
+        return f"Constancia {self.alumno} - {self.periodo_escolar} ({self.literal_final})"
