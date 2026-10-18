@@ -1,22 +1,27 @@
-from rest_framework import viewsets, filters, status, permissions
-from rest_framework.generics import ListAPIView
+from rest_framework import viewsets, filters, status, permissions, exceptions
+from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.http import HttpResponse, FileResponse
+from django.shortcuts import render
 from django.conf import settings
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.db.models import ProtectedError, Prefetch
 import logging
 import re
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
     AlumnoInscripcionSerializer,
     PeriodoInscripcionSerializer,
+    PeriodoCalificacionSerializer,
+    CargaMasivaCalificacionesSerializer,
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
@@ -1013,6 +1018,10 @@ class InscripcionDocenteExternaAPIView(APIView):
     """
     Endpoint público para inscripción externa de alumnos.
 
+    - GET  /api/academico/inscripcion-externa/?token=...  → formulario HTML
+      móvil para que el representante se inscriba sin usuario en la plataforma.
+    - POST /api/academico/inscripcion-externa/?token=...  → crea la inscripción.
+
     Accesible por URL externa sin sesión JWT (AllowAny).
     Valida un token de acceso seguro y el estado del periodo de inscripción
     antes de crear el alumno y su inscripción.
@@ -1020,41 +1029,83 @@ class InscripcionDocenteExternaAPIView(APIView):
     permission_classes = [permissions.AllowAny]
     serializer_class = AlumnoInscripcionSerializer
 
-    def post(self, request, *args, **kwargs):
-        # 1) Extraer el token de los parámetros de la URL
+    def _validar_periodo(self, request):
+        """
+        Compartido por GET y POST: extrae el token de la URL, busca el periodo
+        y valida que esté disponible. Devuelve (periodo, Response_de_error).
+        """
         token = request.query_params.get('token')
         if not token:
-            return Response(
+            return None, Response(
                 {'success': False, 'error': 'Token de acceso requerido.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-
-        # 2) Buscar el PeriodoInscripcion por el token (genérico para no filtrar info)
         try:
             periodo = PeriodoInscripcion.objects.get(token_acceso=token)
         except PeriodoInscripcion.DoesNotExist:
-            return Response(
+            return None, Response(
                 {'success': False, 'error': 'Acceso denegado.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
         except Exception:
             logger.debug('Error buscando PeriodoInscripcion por token', exc_info=True)
-            return Response(
+            return None, Response(
                 {'success': False, 'error': 'Acceso denegado.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
-
-        # 3) Regla de negocio: verificar disponibilidad del periodo
         if not periodo.esta_disponible():
-            return Response(
-                {
-                    'success': False,
-                    'error': 'El periodo de inscripciones ha concluido o está deshabilitado.',
-                },
+            return None, Response(
+                {'success': False, 'error': 'El periodo de inscripciones ha concluido o está deshabilitado.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        return periodo, None
 
-        # 4) Procesar la inscripción con el serializador existente
+    def get(self, request, *args, **kwargs):
+        """
+        Renderiza el formulario público de inscripción (HTML móvil).
+
+        Si el token es inválido o el periodo no está disponible, devuelve un
+        JSON de error con el código correspondiente (403/400).
+        """
+        periodo, error = self._validar_periodo(request)
+        if error is not None:
+            return error
+
+        # Grupos disponibles para el selector, con etiqueta legible.
+        grupos = (
+            GruposAcademicos.objects
+            .select_related('grado', 'seccion', 'turno', 'nivel')
+            .order_by('nivel__nombre_nivel', 'grado__orden', 'seccion__nombre_seccion')
+        )
+        grupos_data = [
+            {
+                'id': g.id_grupo,
+                'etiqueta': (
+                    f"{g.grado.nombre_grado} '{g.seccion.nombre_seccion}'"
+                    f" — {g.turno.nombre_turno}"
+                    + (f" ({g.nivel.nombre_nivel})" if g.nivel else '')
+                ),
+            }
+            for g in grupos
+        ]
+
+        return render(
+            request,
+            'inscripcion_externa.html',
+            {
+                'periodo': periodo,
+                'grupos': grupos_data,
+                'token': request.query_params.get('token'),
+            },
+        )
+
+    def post(self, request, *args, **kwargs):
+        # 1) Extraer el token de la URL y validar el periodo (helper compartido).
+        periodo, error = self._validar_periodo(request)
+        if error is not None:
+            return error
+
+        # 2) Procesar la inscripción con el serializador existente.
         serializer = AlumnoInscripcionSerializer(data=request.data)
         if serializer.is_valid():
             try:
@@ -1126,12 +1177,16 @@ class AlternarUrlInscripcionAPIView(APIView):
 
 
 # ============================================================================
-# ENDPOINT DE LISTADO DE PERIODOS DE INSCRIPCION (ADMIN)
+# ENDPOINTS DE PERIODOS DE INSCRIPCION (ADMIN): LISTADO, CREACIÓN Y EDICIÓN
 # ============================================================================
 
-class PeriodoInscripcionListAPIView(ListAPIView):
+class PeriodoInscripcionListCreateAPIView(ListCreateAPIView):
     """
-    Listado de periodos de inscripción para el panel administrativo.
+    Listado y creación de periodos de inscripción para el panel administrativo.
+
+    - GET  /api/academico/periodos/          → lista todos los periodos.
+    - POST /api/academico/periodos/          → crea un periodo nuevo (el
+      token_acceso se autogenera en el modelo).
 
     Devuelve pk, nombre, fechas, estado del switch (activo_manual) y
     token_acceso. Requiere autenticación JWT (IsAuthenticated).
@@ -1153,4 +1208,221 @@ class PeriodoInscripcionListAPIView(ListAPIView):
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        tags=['Periodos de Inscripción'],
+        operation_summary='Crear periodo de inscripción',
+        operation_description='Crea un periodo nuevo con nombre y calendario. '
+                              'El token_acceso de la URL pública se autogenera. '
+                              'Requiere autenticación JWT.',
+        request_body=PeriodoInscripcionSerializer,
+        responses={
+            201: PeriodoInscripcionSerializer,
+            400: openapi.Response('Error de validación'),
+            401: openapi.Response('No autenticado'),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+
+
+class PeriodoInscripcionDetailAPIView(RetrieveUpdateDestroyAPIView):
+    """
+    Detalle, edición y eliminación de un periodo de inscripción para el panel administrativo.
+
+    - GET    /api/academico/periodos/<id>/          → detalle del periodo.
+    - PATCH  /api/academico/periodos/<id>/          → edición parcial (nombre,
+      fecha_inicio, fecha_fin) desde el formulario del frontend.
+    - DELETE /api/academico/periodos/<id>/          → elimina el periodo.
+
+    Requiere autenticación JWT (IsAuthenticated).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = PeriodoInscripcionSerializer
+    queryset = PeriodoInscripcion.objects.all()
+
+    @swagger_auto_schema(
+        tags=['Periodos de Inscripción'],
+        operation_summary='Detalle de un periodo de inscripción',
+        operation_description='Retorna el periodo con su pk, nombre, calendario, '
+                              'activo_manual y token_acceso. Requiere autenticación JWT.',
+        responses={
+            200: PeriodoInscripcionSerializer,
+            401: openapi.Response('No autenticado'),
+            404: openapi.Response('Periodo no encontrado'),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        tags=['Periodos de Inscripción'],
+        operation_summary='Editar periodo de inscripción',
+        operation_description='Actualización parcial (PATCH) del nombre y las fechas '
+                              'del periodo. Valida que fecha_fin > fecha_inicio. '
+                              'Requiere autenticación JWT.',
+        request_body=PeriodoInscripcionSerializer,
+        responses={
+            200: PeriodoInscripcionSerializer,
+            400: openapi.Response('Error de validación'),
+            401: openapi.Response('No autenticado'),
+            404: openapi.Response('Periodo no encontrado'),
+        },
+    )
+    def patch(self, request, *args, **kwargs):
+        return super().patch(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        tags=['Periodos de Inscripción'],
+        operation_summary='Eliminar periodo de inscripción',
+        operation_description='Elimina permanentemente un periodo de inscripción. '
+                              'Si el periodo estaba activo, el enlace público deja '
+                              'de funcionar. Requiere autenticación JWT.',
+        responses={
+            204: openapi.Response('Periodo eliminado'),
+            401: openapi.Response('No autenticado'),
+            404: openapi.Response('Periodo no encontrado'),
+        },
+    )
+    def delete(self, request, *args, **kwargs):
+        return super().delete(request, *args, **kwargs)
+
+
+class CargaCalificacionesDocenteExternaAPIView(APIView):
+    """
+    Endpoint público para la carga masiva de calificaciones por los docentes.
+
+    - POST /api/academico/calificaciones/cargar-externa/?token=...
+
+    Accesible por URL externa sin sesión JWT (AllowAny). Valida el token del
+    lapso y que el periodo esté abierto (esta_abierto(): switch manual +
+    fecha límite) antes de persistir la sección completa con guardar_lote(),
+    que garantiza atomicidad (rollback total) e idempotencia (update_or_create).
+    """
+    permission_classes = [permissions.AllowAny]
+    serializer_class = CargaMasivaCalificacionesSerializer
+
+    @swagger_auto_schema(
+        tags=['Calificaciones'],
+        operation_summary='Carga masiva de notas de un lapso (docente externo)',
+        operation_description='Recibe el lote de calificaciones de una sección '
+                              'para un lapso abierto y lo persiste de forma '
+                              'atómica e idempotente. Acceso por token en la '
+                              'URL sin sesión JWT.',
+        manual_parameters=[
+            openapi.Parameter(
+                'token', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description='Token seguro del periodo de calificación.',
+            ),
+        ],
+        request_body=CargaMasivaCalificacionesSerializer,
+        responses={
+            200: openapi.Response('Lote guardado (desglose creadas/actualizadas)'),
+            400: openapi.Response('Periodo cerrado, datos inválidos o reglas pedagógicas'),
+            403: openapi.Response('Token ausente o inválido'),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        # 1) Token de acceso en los query params de la URL.
+        token = request.query_params.get('token')
+        if not token:
+            return Response(
+                {'success': False, 'error': 'Token de acceso requerido.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 2) Periodo de calificación correspondiente al token.
+        try:
+            periodo = PeriodoCalificacion.objects.get(token_acceso=token)
+        except PeriodoCalificacion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except Exception:
+            logger.debug('Error buscando PeriodoCalificacion por token', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # 3) Regla estricta: el lapso debe estar abierto (switch manual y
+        #    fecha límite de carga de notas).
+        if not periodo.esta_abierto():
+            return Response(
+                {'success': False,
+                 'error': 'El periodo de carga de notas ha concluido o está cerrado.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 4) Validación sintáctica del lote.
+        serializer = self.serializer_class(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {'success': False, 'error': 'Datos inválidos.', 'details': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 5) Persistencia atómica e idempotente de la sección completa.
+        try:
+            resumen = serializer.guardar_lote(periodo_objeto=periodo)
+        except ValidationError as exc:
+            # El rollback total y la auditoría (logger.debug) ya ocurrieron
+            # dentro de guardar_lote(); aquí se traduce a respuesta 400.
+            detalle = exc.message_dict if hasattr(exc, 'message_dict') else exc.messages
+            return Response(
+                {'success': False,
+                 'error': 'Una o más notas incumplen las reglas de calificación; no se guardó ninguna.',
+                 'details': detalle},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except IntegrityError:
+            logger.debug('Error de integridad guardando lote de calificaciones', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'El lote referencia alumnos o grupos inexistentes.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            logger.debug('Error inesperado guardando lote de calificaciones', exc_info=True)
+            return Response(
+                {'success': False, 'error': 'No se pudieron guardar las calificaciones.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({'success': True, **resumen}, status=status.HTTP_200_OK)
+
+
+class ConfiguracionPeriodoCalificacionViewSet(viewsets.ModelViewSet):
+    """
+    Control administrativo de los periodos (lapsos) de calificación.
+
+    Requiere autenticación JWT (IsAuthenticated). Permite al personal
+    administrativo del panel escolar:
+    - Consultar los lapsos existentes (Diciembre, Abril, Julio).
+    - Modificar la fecha límite de carga de notas.
+    - Alternar el switch manual 'activo_manual' de apertura/cierre.
+
+    Rutas (registradas en el DefaultRouter de academico):
+    - GET/POST  /api/academico/periodos-calificacion/
+    - GET/PUT/PATCH/DELETE /api/academico/periodos-calificacion/{pk}/
+    """
+    queryset = PeriodoCalificacion.objects.all().order_by('numero_periodo')
+    serializer_class = PeriodoCalificacionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_destroy(self, instance):
+        """
+        CalificacionLiteral referencia al periodo con PROTECT: eliminarlo con
+        notas registradas se traduce en un 400 auditado (no en un 500 crudo).
+        """
+        try:
+            instance.delete()
+        except ProtectedError:
+            logger.debug(
+                'Intento de eliminar PeriodoCalificacion %s con calificaciones asociadas',
+                instance.pk, exc_info=True,
+            )
+            raise exceptions.ValidationError(
+                'No se puede eliminar el periodo porque tiene calificaciones registradas.'
+            )
 

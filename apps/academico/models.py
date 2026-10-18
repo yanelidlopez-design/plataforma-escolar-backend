@@ -1,6 +1,9 @@
 import hashlib
 import secrets
 
+from django.core.exceptions import ValidationError
+from django.core.validators import RegexValidator
+
 from django.db import models
 from django.utils import timezone
 
@@ -239,3 +242,198 @@ class PeriodoInscripcion(models.Model):
 
     def __str__(self):
         return f"PeriodoInscripcion #{self.pk} - {self.nombre}"
+
+
+class PeriodoCalificacion(models.Model):
+    """
+    Lapso de calificaciones del Sistema de Boletas Consolidadas de Tres Lapsos.
+
+    La tabla es administrada por Django (managed=True por defecto) y se
+    materializa físicamente en MariaDB como 'periodo_calificacion'.
+
+    Reglas de negocio:
+    - 'numero_periodo' es único: 1=Diciembre, 2=Abril, 3=Julio.
+    - 'token_acceso' se autogenera con secrets.token_urlsafe(32) si viene vacío
+      y alimenta la URL de carga de notas de los docentes.
+    """
+
+    NUMERO_PERIODO_CHOICES = [
+        (1, 'Diciembre'),
+        (2, 'Abril'),
+        (3, 'Julio'),
+    ]
+
+    numero_periodo = models.IntegerField(
+        choices=NUMERO_PERIODO_CHOICES,
+        unique=True,
+        db_column='numero_periodo',
+        help_text="Lapso del año escolar: 1=Diciembre, 2=Abril, 3=Julio.",
+    )
+    fecha_limite = models.DateTimeField(
+        db_column='fecha_limite',
+        help_text="Fecha y hora límite para que los profesores carguen las notas.",
+    )
+    activo_manual = models.BooleanField(
+        default=True,
+        db_column='activo_manual',
+        help_text="Switch de la interfaz de administración.",
+    )
+    token_acceso = models.CharField(
+        max_length=64,
+        unique=True,
+        editable=False,
+        db_column='token_acceso',
+        help_text="Token seguro para la URL de acceso de los docentes.",
+    )
+
+    class Meta:
+        db_table = 'periodo_calificacion'
+        verbose_name = 'Periodo de Calificación'
+        verbose_name_plural = 'Periodos de Calificación'
+
+    def save(self, *args, **kwargs):
+        if not self.token_acceso:
+            self.token_acceso = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+
+    def esta_abierto(self):
+        """
+        Indica si el lapso admite la carga de notas por parte de los docentes.
+
+        Regla estricta:
+        1. Si activo_manual es False (switch de la interfaz administrativa
+           apagado) → retorna False inmediatamente.
+        2. Si now() superó la fecha_limite → retorna False.
+        """
+        if not self.activo_manual:
+            return False
+        return timezone.now() <= self.fecha_limite
+
+    def __str__(self):
+        return f"PeriodoCalificacion #{self.pk} - {self.get_numero_periodo_display()}"
+
+
+class CalificacionLiteral(models.Model):
+    """
+    Nota literal (A-E) o informe descriptivo por alumno, grupo y lapso.
+
+    Reglas pedagógicas (validadas en clean() y ejecutadas siempre desde save()
+    mediante self.full_clean()):
+    - Inicial/Preescolar: se prohíbe la 'nota_literal' y el
+      'informe_descriptivo' es obligatorio.
+    - Primaria (1ro a 6to grado): la 'nota_literal' (A-E) es obligatoria y el
+      'informe_descriptivo' es opcional.
+    - La 'nota_literal' se normaliza a mayúscula antes de persistir.
+    """
+
+    alumno = models.ForeignKey(Alumnos, on_delete=models.CASCADE, db_column='id_alumno')
+    grupo = models.ForeignKey(GruposAcademicos, on_delete=models.CASCADE, db_column='id_grupo_academico')
+    periodo = models.ForeignKey(PeriodoCalificacion, on_delete=models.PROTECT, db_column='id_periodo')
+    nota_literal = models.CharField(
+        max_length=1,
+        blank=True,
+        null=True,
+        db_column='nota_literal',
+        validators=[
+            RegexValidator(
+                regex=r'^[A-Ea-e]$',
+                message="La nota literal debe ser una letra de la A a la E (mayúscula o minúscula).",
+            ),
+        ],
+        help_text="Literal A-E (Primaria). Debe ir vacío en Inicial/Preescolar.",
+    )
+    informe_descriptivo = models.TextField(
+        blank=True,
+        null=True,
+        db_column='informe_descriptivo',
+        help_text="Relato del desarrollo del estudiante; obligatorio en Inicial/Preescolar.",
+    )
+    fecha_registro = models.DateTimeField(auto_now_add=True, db_column='fecha_registro')
+
+    class Meta:
+        db_table = 'calificacion_literal'
+        verbose_name = 'Calificación Literal'
+        verbose_name_plural = 'Calificaciones Literales'
+        unique_together = ('alumno', 'grupo', 'periodo')
+
+    def clean(self):
+        super().clean()
+
+        # Normaliza la nota a mayúscula antes de validar las reglas de negocio
+        # (full_clean() invoca clean_fields() antes que clean(), por eso el
+        # RegexValidator acepta A-E en ambos casos).
+        if self.nota_literal:
+            self.nota_literal = self.nota_literal.strip().upper() or None
+
+        # Determina el nivel pedagógico del grupo (nivel puede ser NULL en la
+        # tabla legacy, por eso se respalda la detección con el nombre del grado).
+        nivel_nombre = ''
+        grado_nombre = ''
+        if self.grupo_id is not None:
+            try:
+                grupo = self.grupo
+            except GruposAcademicos.DoesNotExist:
+                grupo = None
+            if grupo is not None:
+                nivel_nombre = (grupo.nivel.nombre_nivel or '') if grupo.nivel_id else ''
+                grado_nombre = (grupo.grado.nombre_grado or '') if grupo.grado_id else ''
+
+        nombre_nivel = nivel_nombre.upper()
+        nombre_grado = grado_nombre.upper()
+
+        es_inicial = (
+            'INICIAL' in nombre_nivel
+            or 'PREESCOLAR' in nombre_nivel
+            or 'INICIAL' in nombre_grado
+        )
+        grados_primaria = (
+            'PRIMER GRADO', 'SEGUNDO GRADO', 'TERCER GRADO',
+            'CUARTO GRADO', 'QUINTO GRADO', 'SEXTO GRADO',
+        )
+        es_primaria = 'PRIMARIA' in nombre_nivel or any(g in nombre_grado for g in grados_primaria)
+
+        if es_inicial:
+            errores = {}
+            if self.nota_literal:
+                errores['nota_literal'] = (
+                    'En Inicial/Preescolar no se asigna nota literal (A-E); '
+                    'registre únicamente el informe descriptivo.'
+                )
+            if not self.informe_descriptivo or not self.informe_descriptivo.strip():
+                errores['informe_descriptivo'] = (
+                    'En Inicial/Preescolar el informe descriptivo es obligatorio.'
+                )
+            if errores:
+                raise ValidationError(errores)
+        elif es_primaria:
+            if not self.nota_literal:
+                raise ValidationError({
+                    'nota_literal': (
+                        'En Primaria (1ro a 6to grado) la nota literal (A-E) es obligatoria.'
+                    ),
+                })
+
+    def save(self, *args, **kwargs):
+        # La nota se persiste siempre en mayúscula (A-E).
+        if self.nota_literal is not None:
+            self.nota_literal = self.nota_literal.strip().upper() or None
+        # fecha_registro se setea antes de validar para que full_clean() no lo
+        # vea vacío (auto_now_add lo fijará igual en pre_save).
+        if self.fecha_registro is None:
+            self.fecha_registro = timezone.now()
+        # Las reglas pedagógicas y los validadores de campo se ejecutan SIEMPRE.
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        if self.nota_literal:
+            return (
+                f"CalificaciónLiteral {self.nota_literal} - "
+                f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} "
+                f"(Periodo {self.periodo.numero_periodo})"
+            )
+        return (
+            f"CalificaciónLiteral (informe) - "
+            f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} "
+            f"(Periodo {self.periodo.numero_periodo})"
+        )

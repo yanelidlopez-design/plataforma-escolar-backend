@@ -1,6 +1,7 @@
 import logging
 
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers
 from .models import (
@@ -10,6 +11,8 @@ from .models import (
     Calificaciones,
     Asistencias,
     PeriodoInscripcion,
+    CalificacionLiteral,
+    PeriodoCalificacion,
 )
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
@@ -432,8 +435,43 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
     fecha_inscripcion_inicial = serializers.DateField(required=False, allow_null=True)
     estatus_general = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
+    # --- Datos adicionales del alumno (formulario completo de inscripción) ---
+    carnet_patria_codigo = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    carnet_patria_serial = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    numero_cuenta = serializers.CharField(max_length=30, required=False, allow_blank=True, allow_null=True)
+    tipo_cuenta = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    banco = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    entidad_federal_nacimiento = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    municipio_nacimiento = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    parroquia_nacimiento = serializers.CharField(max_length=100, required=False, allow_blank=True, allow_null=True)
+    condicion_fisica = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    apoyo_escolar = serializers.BooleanField(required=False, default=False)
+    vacunas_completas = serializers.BooleanField(required=False, default=False)
+    tratamiento_medico = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    talla_camisa = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    talla_pantalon = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    talla_zapato = serializers.CharField(max_length=20, required=False, allow_blank=True, allow_null=True)
+    estado_civil_padres = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    ingreso_familiar = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    profesion_madre = serializers.CharField(max_length=150, required=False, allow_blank=True, allow_null=True)
+    profesion_padre = serializers.CharField(max_length=150, required=False, allow_blank=True, allow_null=True)
+    tipo_vivienda = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
+    numero_hermanos = serializers.IntegerField(required=False, allow_null=True)
+    numero_en_el_planter = serializers.IntegerField(required=False, allow_null=True)
+    discapacidad = serializers.BooleanField(required=False, default=False)
+    tipo_discapacidad = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    observaciones = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    # --- Dirección de residencia (anidada, opcional) ---
+    direccion = DireccionAnidadaSerializer(
+        required=False, allow_null=True,
+        help_text='Dirección de residencia del alumno (se crea en core.Direcciones).',
+    )
+
     # --- Representante anidado ---
     representante = RepresentanteSerializer(required=True)
+    parentesco = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True,
+                                       help_text='Parentesco del representante con el alumno.')
 
     # --- Datos de inscripción ---
     id_grupo = serializers.IntegerField(required=True)
@@ -446,6 +484,8 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
         from apps.personal.models import RepresentantesLegales, AlumnoRepresentante
 
         representante_data = validated_data.pop('representante')
+        parentesco = validated_data.pop('parentesco', 'Padre') or 'Padre'
+        direccion_data = validated_data.pop('direccion', None)
         id_grupo = validated_data.pop('id_grupo')
         fecha_inscripcion = validated_data.pop('fecha_inscripcion', None) or timezone.now()
         estado_inscripcion = validated_data.pop('estado_inscripcion', 'Activa') or 'Activa'
@@ -456,6 +496,11 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
             validated_data['estatus_general'] = 'Activo'
         monto_pago = validated_data.pop('monto_pago', None)
         referencia_bancaria = validated_data.pop('referencia_bancaria', None)
+
+        # Campos numéricos opcionales: cadena vacía => None (DRF rechaza '' en Decimal/Integer).
+        for campo in ('peso_kg', 'talla_cm', 'ingreso_familiar', 'numero_hermanos', 'numero_en_el_planter'):
+            if validated_data.get(campo) == '':
+                validated_data[campo] = None
 
         try:
             with transaction.atomic():
@@ -473,15 +518,26 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
                 # 2) Crear el registro del alumno.
                 alumno = Alumnos.objects.create(**validated_data)
 
-                # 3) Vincular alumno y representante en la tabla pivote.
+                # 3) Vincular dirección de residencia (si se envió).
+                if direccion_data:
+                    direccion = Direcciones.objects.create(
+                        calle=direccion_data.get('calle', ''),
+                        ciudad=direccion_data.get('ciudad', ''),
+                        estado=direccion_data.get('estado', ''),
+                        referencia=direccion_data.get('referencia') or '',
+                    )
+                    alumno.id_direccion_residencia = direccion
+                    alumno.save(update_fields=['id_direccion_residencia'])
+
+                # 4) Vincular alumno y representante en la tabla pivote.
                 AlumnoRepresentante.objects.create(
                     alumno=alumno,
                     representante=representante,
-                    parentesco='Padre',
+                    parentesco=parentesco,
                     es_principal=True,
                 )
 
-                # 4) Registrar la inscripción académica formal en el grupo provisto.
+                # 5) Registrar la inscripción académica formal en el grupo provisto.
                 grupo = GruposAcademicos.objects.get(pk=id_grupo)
                 inscripcion = Inscripciones.objects.create(
                     alumno=alumno,
@@ -501,14 +557,37 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
             )
 
 
+class DateTimeHastaFinDeDia(serializers.DateTimeField):
+    """
+    DateTimeField que, cuando recibe solo una fecha (YYYY-MM-DD), la
+    interpreta como el final de ese día (23:59:59) en lugar de la
+    medianoche.
+
+    Se usa en 'fecha_fin' para que un periodo de inscripción incluya el
+    día completo seleccionado en el formulario del frontend.
+    """
+
+    def to_internal_value(self, value):
+        if isinstance(value, str) and len(value) == 10:
+            value = f'{value}T23:59:59'
+        return super().to_internal_value(value)
+
+
 class PeriodoInscripcionSerializer(serializers.ModelSerializer):
     """
-    Serializador de solo lectura para el listado de periodos de inscripción.
+    Serializador de lectura/escritura para periodos de inscripción.
 
-    Expone pk (id), nombre, calendario, estado del switch y token_acceso
+    Lectura: expone pk, nombre, calendario, estado del switch y token_acceso
     para que el panel administrativo pueda construir el formulario público
     y alternar el estado de cada periodo.
+
+    Escritura: permite crear (POST) y editar (PATCH) nombre y fechas desde
+    el frontend del personal administrativo. 'id' y 'token_acceso' son de
+    solo lectura (el token se autogenera en el modelo).
     """
+
+    # fecha_fin incluye el día completo cuando llega solo YYYY-MM-DD.
+    fecha_fin = DateTimeHastaFinDeDia()
 
     class Meta:
         model = PeriodoInscripcion
@@ -520,4 +599,140 @@ class PeriodoInscripcionSerializer(serializers.ModelSerializer):
             'activo_manual',
             'token_acceso',
         ]
-        read_only_fields = fields
+        read_only_fields = ['id', 'token_acceso']
+
+    def validate(self, attrs):
+        """La fecha de fin debe ser posterior a la de inicio (incluye PATCH parcial)."""
+        fecha_inicio = attrs.get('fecha_inicio', getattr(self.instance, 'fecha_inicio', None))
+        fecha_fin = attrs.get('fecha_fin', getattr(self.instance, 'fecha_fin', None))
+        if fecha_inicio and fecha_fin and fecha_fin <= fecha_inicio:
+            raise serializers.ValidationError(
+                'La fecha de fin debe ser posterior a la fecha de inicio.'
+            )
+        return attrs
+
+
+class NotaEstudianteInputSerializer(serializers.Serializer):
+    """
+    Nota individual de un estudiante dentro de un lote de carga masiva.
+
+    Serializador plano (deliberadamente NO ModelSerializer) para minimizar el
+    overhead de introspección de metadatos cuando se procesan secciones
+    completas en una sola petición.
+
+    JSON conceptual:
+    {
+      "id_alumno": 31,
+      "nota_literal": "B",
+      "informe_descriptivo": null
+    }
+    """
+
+    id_alumno = serializers.IntegerField()
+    nota_literal = serializers.CharField(
+        max_length=1,
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+    informe_descriptivo = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+
+class CargaMasivaCalificacionesSerializer(serializers.Serializer):
+    """
+    Lote de calificaciones de una sección (grupo académico) para un lapso.
+
+    JSON conceptual:
+    {
+      "id_grupo_academico": 5,
+      "calificaciones": [
+        {"id_alumno": 31, "nota_literal": "B", "informe_descriptivo": null},
+        {"id_alumno": 32, "nota_literal": null, "informe_descriptivo": "Avanza con entusiasmo"}
+      ]
+    }
+
+    Reglas de negocio:
+    - Atomicidad: si una sola nota del lote incumple las reglas pedagógicas
+      (clean() de CalificacionLiteral), se revierte TODA la sección.
+    - Idempotencia: update_or_create por (alumno, grupo, periodo); reenviar el
+      formulario actualiza la nota preexistente sin error de duplicado.
+    """
+
+    id_grupo_academico = serializers.IntegerField()
+    calificaciones = NotaEstudianteInputSerializer(many=True)
+
+    def guardar_lote(self, periodo_objeto):
+        """
+        Persiste el lote de forma atómica e idempotente para el periodo dado.
+
+        Retorna un resumen de la operación:
+        {'id_grupo_academico', 'id_periodo', 'creadas', 'actualizadas', 'total'}
+        """
+        id_grupo_academico = self.validated_data['id_grupo_academico']
+        items = self.validated_data['calificaciones']
+
+        creadas = 0
+        actualizadas = 0
+
+        try:
+            with transaction.atomic():
+                for item in items:
+                    nota_literal = (item.get('nota_literal') or '').strip() or None
+                    informe_descriptivo = (item.get('informe_descriptivo') or '').strip() or None
+
+                    _, creado = CalificacionLiteral.objects.update_or_create(
+                        alumno_id=item['id_alumno'],
+                        grupo_id=id_grupo_academico,
+                        periodo=periodo_objeto,
+                        defaults={
+                            'nota_literal': nota_literal,
+                            'informe_descriptivo': informe_descriptivo,
+                        },
+                    )
+                    if creado:
+                        creadas += 1
+                    else:
+                        actualizadas += 1
+        except ValidationError:
+            # Auditoría: el traceback queda registrado y la excepción se
+            # propaga para que la vista responda al cliente. Al capturar
+            # FUERA del bloque atomic, el rollback de la sección completa
+            # (incluidas las notas ya escritas del lote) ya se ejecutó.
+            logger.debug(
+                'Rollback del lote de calificaciones del grupo %s (lapso %s)',
+                id_grupo_academico, getattr(periodo_objeto, 'pk', None), exc_info=True,
+            )
+            raise
+        except IntegrityError:
+            logger.debug(
+                'Error de integridad en el lote de calificaciones del grupo %s (lapso %s)',
+                id_grupo_academico, getattr(periodo_objeto, 'pk', None), exc_info=True,
+            )
+            raise
+
+        return {
+            'id_grupo_academico': id_grupo_academico,
+            'id_periodo': periodo_objeto.pk,
+            'creadas': creadas,
+            'actualizadas': actualizadas,
+            'total': len(items),
+        }
+
+
+class PeriodoCalificacionSerializer(serializers.ModelSerializer):
+    """
+    Configuración administrativa de un lapso de calificación (Diciembre,
+    Abril o Julio).
+
+    El panel puede modificar 'fecha_limite' y alternar 'activo_manual';
+    'token_acceso' es de solo lectura porque se autogenera en el modelo.
+    """
+
+    class Meta:
+        model = PeriodoCalificacion
+        fields = ['id', 'numero_periodo', 'fecha_limite', 'activo_manual', 'token_acceso']
+        read_only_fields = ['id', 'token_acceso']
