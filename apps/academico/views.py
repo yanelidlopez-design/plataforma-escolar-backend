@@ -40,6 +40,7 @@ from .services.webhook_service import procesar_alumno_webhook, procesar_inscripc
 from .tasks import encolar_exportacion, leer_estado_reporte, ruta_archivo_reporte
 from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones
 from apps.core.serializers import GradosAcademicosSerializer, SeccionesSerializer
+from apps.personal.models import Profesores
 
 logger = logging.getLogger(__name__)
 
@@ -1091,12 +1092,24 @@ class InscripcionDocenteExternaAPIView(APIView):
             for g in grupos
         ]
 
+        # Personal del plantel para el selector de "Profesor Encargado".
+        # Se consulta en cada GET: el combo se actualiza solo cuando se
+        # agregan más profesores en la plataforma (no es estático).
+        profesores_data = [
+            {
+                'id': p.id_profesor,
+                'nombre': f"{p.primer_nombre} {p.primer_apellido}".strip(),
+            }
+            for p in Profesores.objects.order_by('primer_nombre', 'primer_apellido')
+        ]
+
         return render(
             request,
             'inscripcion_externa.html',
             {
                 'periodo': periodo,
                 'grupos': grupos_data,
+                'profesores': profesores_data,
                 'token': request.query_params.get('token'),
             },
         )

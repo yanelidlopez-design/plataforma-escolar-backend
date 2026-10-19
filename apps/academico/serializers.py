@@ -18,7 +18,7 @@ from .models import (
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
 from apps.personal.serializers import ProfesoresSerializer
-from apps.personal.models import RepresentantesLegales, AlumnoRepresentante
+from apps.personal.models import RepresentantesLegales, AlumnoRepresentante, Profesores
 
 
 logger = logging.getLogger(__name__)
@@ -403,7 +403,10 @@ class RepresentanteSerializer(serializers.Serializer):
     """
     cedula = serializers.CharField(max_length=20, required=True, validators=[])
     nombre = serializers.CharField(max_length=150, required=True)
-    apellido = serializers.CharField(max_length=150, required=True)
+    # allow_blank porque el formulario externo de inscripción no tiene campo de
+    # apellido separado (antes causaba 400 en todo POST); el JS divide el
+    # nombre completo, pero se tolera '' para no bloquear otros clientes.
+    apellido = serializers.CharField(max_length=150, required=False, allow_blank=True, allow_null=True, default='')
     telefono = serializers.CharField(max_length=20, required=True)
     correo = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
 
@@ -476,6 +479,11 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
 
     # --- Datos de inscripción ---
     id_grupo = serializers.IntegerField(required=True)
+    # Profesor encargado del alumno (FK id_profesor_encargado en la tabla
+    # alumnos). Opcional: lo envía el formulario externo y la plataforma.
+    id_profesor_encargado = serializers.PrimaryKeyRelatedField(
+        queryset=Profesores.objects.all(), required=False, allow_null=True,
+    )
     fecha_inscripcion = serializers.DateTimeField(required=False, allow_null=True)
     estado_inscripcion = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
     monto_pago = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
@@ -510,7 +518,8 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
                     cedula=representante_data['cedula'],
                     defaults={
                         'primer_nombre': representante_data.get('nombre', ''),
-                        'primer_apellido': representante_data.get('apellido', ''),
+                        # `or ''` evita guardar None si otro cliente envía null.
+                        'primer_apellido': representante_data.get('apellido') or '',
                         'telefono_principal': representante_data.get('telefono', ''),
                         'email': representante_data.get('correo') or None,
                     },

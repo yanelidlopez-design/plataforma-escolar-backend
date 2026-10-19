@@ -27,6 +27,21 @@
     .radios { display: flex; gap: 14px; align-items: center; margin-top: 2px; }
     .radios label { font-size: 14px; font-weight: 600; color: #334155; margin: 0; cursor: pointer; display: flex; align-items: center; gap: 6px; }
     .radios input { width: auto; flex: 0 0 auto; }
+    /* Restaura el radio nativo: el reset global `input { -webkit-appearance: none }`
+       oculta el estado marcado y hace que parezca que no responde al toque. */
+    .radios input[type="radio"] {
+      -webkit-appearance: radio;
+      appearance: auto;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+      accent-color: #0ea5e9;
+      cursor: pointer;
+    }
     .opcional { color: #64748b; font-weight: 400; font-size: 12px; margin-left: 6px; }
     .btn-cancelar { width: 100%; margin-top: 8px; padding: 14px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; }
     .btn-cancelar:active { background: #e2e8f0; }
@@ -164,20 +179,42 @@
             <label>Talla Camisa</label>
             <select name="talla_camisa">
               <option value="">Seleccionar...</option>
-              <option value="S">S</option>
-              <option value="M">M</option>
-              <option value="L">L</option>
-              <option value="XL">XL</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
             </select>
           </div>
           <div class="field">
             <label>Talla Pantalón</label>
             <select name="talla_pantalon">
               <option value="">Seleccionar...</option>
-              <option value="S">S</option>
-              <option value="M">M</option>
-              <option value="L">L</option>
-              <option value="XL">XL</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
             </select>
           </div>
           <div class="field">
@@ -273,7 +310,7 @@
         </div>
         <div class="field full">
           <label>Nombre Completo <span class="req">*</span></label>
-          <input name="rep_nombre" required maxlength="200">
+          <input name="rep_nombre" required maxlength="150">
         </div>
         <div class="row">
           <div class="field">
@@ -397,9 +434,12 @@
           </select>
         </div>
         <div class="field full">
-          <label>Profesor Encargado</label>
-          <select name="profesor_encargado" disabled>
-            <option value="">Primero seleccione un grupo...</option>
+          <label>Profesor Encargado <span class="opcional">(opcional)</span></label>
+          <select name="profesor_encargado">
+            <option value="">Seleccionar profesor...</option>
+            {% for p in profesores %}
+            <option value="{{ p.id }}">{{ p.nombre }}</option>
+            {% endfor %}
           </select>
         </div>
       </fieldset>
@@ -416,8 +456,8 @@
             <label>Estado</label>
             <select name="estado_inscripcion">
               <option value="Activa">Activa</option>
-              <option value="Inactiva">Inactiva</option>
-              <option value="Pendiente">Pendiente</option>
+              <option value="Retirado">Retirado</option>
+              <option value="Egresado">Egresado</option>
             </select>
           </div>
         </div>
@@ -479,10 +519,18 @@
         // Si la dirección viene completamente vacía, no la enviamos.
         if (Object.values(direccion).every(function (x) { return x === null; })) direccion = null;
 
+        // El formulario solo pide el nombre completo: se divide en nombre
+        // (primera palabra) y apellido (resto) porque el serializer requiere
+        // ambos; sin este split el POST siempre fallaba con 400.
+        var nombreCompleto = (d.get('rep_nombre') || '').trim();
+        var tokensNombre = nombreCompleto.split(/\s+/).filter(Boolean);
+        var repNombre = tokensNombre.length ? tokensNombre[0] : '';
+        var repApellido = tokensNombre.length > 1 ? tokensNombre.slice(1).join(' ') : repNombre;
+
         var representante = {
           cedula: d.get('rep_cedula'),
-          nombre: d.get('rep_nombre'),
-          apellido: d.get('rep_apellido') || '',
+          nombre: repNombre,
+          apellido: repApellido,
           telefono: d.get('rep_telefono'),
           correo: nuloSiVacio(d.get('rep_correo'))
         };
@@ -542,7 +590,10 @@
           parentesco: d.get('parentesco') || 'Padre',
           // Inscripción
           id_grupo: parseInt(d.get('id_grupo'), 10),
-          profesor_encargado: null,
+          id_profesor_encargado: (function () {
+            var id = parseInt(d.get('profesor_encargado'), 10);
+            return isNaN(id) ? null : id;
+          })(),
           fecha_inscripcion: d.get('fecha_inscripcion') ? d.get('fecha_inscripcion') + 'T09:00:00' : null,
           estado_inscripcion: nuloSiVacio(d.get('estado_inscripcion')) || 'Activa',
           monto_pago: numSiVacio(d.get('monto_pago')),
@@ -558,14 +609,24 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         })
-          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+          // Respuesta tolerante: si el servidor devolvió HTML (500/404) en vez
+          // de JSON, r.json() lanzaba y el usuario veía un error engañoso.
+          .then(function (r) {
+            return r.text().then(function (t) {
+              var j = null;
+              try { j = JSON.parse(t); } catch (_) { /* respuesta no JSON */ }
+              return { ok: r.ok, body: j };
+            });
+          })
           .then(function (res) {
-            if (res.ok && res.body.success) {
+            if (res.ok && res.body && res.body.success) {
               form.reset();
               mostrar('ok', '✅ ' + (res.body.message || 'Inscripción registrada exitosamente.'));
-            } else {
+            } else if (res.body) {
               var detalle = res.body.error || res.body.errors || 'Revisa los datos ingresados.';
               mostrar('err', '⚠️ ' + (typeof detalle === 'string' ? detalle : JSON.stringify(detalle)));
+            } else {
+              mostrar('err', '⚠️ El servidor respondió con un error inesperado. Inténtalo de nuevo en unos minutos.');
             }
           })
           .catch(function () {

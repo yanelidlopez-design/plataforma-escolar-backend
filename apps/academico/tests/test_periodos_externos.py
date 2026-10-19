@@ -21,7 +21,8 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.academico.models import PeriodoInscripcion, GruposAcademicos
+from apps.academico.models import PeriodoInscripcion, GruposAcademicos, Alumnos
+from apps.personal.models import Profesores
 from apps.core.models import (
     Usuarios,
     PeriodosAcademicos,
@@ -527,3 +528,82 @@ def test_formulario_inscripcion_externa_periodo_apagado(api_client, periodo_desa
     response = api_client.get(url)
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Regresiones: correcciones del formulario de inscripción (tallas, radios,
+# profesor dinámico y guardado con representante sin apellido separado)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_formulario_tallas_uniforme_4_a_18(api_client, periodo_activo, tablas_legacy, tablas_core_grupo):
+    """Camisa y pantalón deben ofrecer tallas 4–18 (sin S/M/L/XL) y conservar
+    los estados válidos del ENUM legacy ('Activa', 'Retirado', 'Egresado')."""
+    url = f"{reverse('inscripcion_externa')}?token={periodo_activo.token_acceso}"
+    html = api_client.get(url).content.decode()
+
+    for talla in range(4, 19):
+        assert f'<option value="{talla}">{talla}</option>' in html  # nosec B101
+    assert 'value="XL"' not in html  # nosec B101
+    assert 'value="S"' not in html  # nosec B101
+    # Opciones fuera del ENUM de la tabla legacy inscripciones.estado_inscripcion.
+    assert 'value="Pendiente"' not in html  # nosec B101
+    assert 'value="Inactiva"' not in html  # nosec B101
+    # Los radios no deben quedar con appearance:none (no se podían marcar).
+    assert '.radios input[type="radio"]' in html  # nosec B101
+
+
+@pytest.mark.django_db
+def test_formulario_profesores_dinamicos(api_client, periodo_activo, tablas_legacy, tablas_core_grupo):
+    """El combo 'Profesor Encargado' debe venir habilitado y poblado con el
+    personal existente en BD (se actualiza al agregar más profesores)."""
+    profesor = Profesores.objects.create(
+        primer_nombre='Ana',
+        primer_apellido='López',
+        cedula='V-20200001',
+        categoria='Profesor',
+    )
+    url = f"{reverse('inscripcion_externa')}?token={periodo_activo.token_acceso}"
+    html = api_client.get(url).content.decode()
+
+    assert 'name="profesor_encargado" disabled' not in html  # nosec B101
+    assert 'name="profesor_encargado"' in html  # nosec B101
+    assert f'<option value="{profesor.id_profesor}">Ana López</option>' in html  # nosec B101
+
+
+@pytest.mark.django_db
+def test_inscripcion_externa_con_profesor_encargado(api_client, periodo_activo, tablas_legacy, tablas_core_grupo):
+    """POST con id_profesor_encargado debe crear la inscripción y vincular el
+    profesor al alumno (FK id_profesor_encargado en la tabla alumnos)."""
+    profesor = Profesores.objects.create(
+        primer_nombre='Luis',
+        primer_apellido='Márquez',
+        cedula='V-20200002',
+        categoria='Integral',
+    )
+    grupo = _crear_grupo_prueba()
+    data = _payload_inscripcion(id_grupo=grupo.id_grupo, cedula_rep='V-19888778')
+    data['id_profesor_encargado'] = profesor.id_profesor
+
+    url = reverse('inscripcion_externa') + f'?token={periodo_activo.token_acceso}'
+    response = api_client.post(url, data, format='json')
+
+    assert response.status_code == status.HTTP_201_CREATED  # nosec B101
+    alumno = Alumnos.objects.get(numero_documento_identidad='12345678')
+    assert alumno.id_profesor_encargado_id == profesor.id_profesor  # nosec B101
+
+
+@pytest.mark.django_db
+def test_inscripcion_externa_representante_apellido_vacio(api_client, periodo_activo, tablas_legacy, tablas_core_grupo):
+    """Regresión del bug 'el botón guardar no hace nada': el formulario no
+    tenía campo de apellido y siempre enviaba '' → 400 en cada intento.
+    Con apellido vacío el POST debe seguir creando el registro (201)."""
+    grupo = _crear_grupo_prueba()
+    data = _payload_inscripcion(id_grupo=grupo.id_grupo, cedula_rep='V-19888779')
+    data['representante']['apellido'] = ''
+
+    url = reverse('inscripcion_externa') + f'?token={periodo_activo.token_acceso}'
+    response = api_client.post(url, data, format='json')
+
+    assert response.status_code == status.HTTP_201_CREATED  # nosec B101
+    assert response.data['success'] is True  # nosec B101
