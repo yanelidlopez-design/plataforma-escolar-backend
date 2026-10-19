@@ -23,7 +23,7 @@ from .models import (
     CriterioEvaluacion,
     EvaluacionLapsoCriterio,
 )
-from apps.core.models import GradosAcademicos as CoreGradosAcademicos, Secciones
+from apps.core.models import GradosAcademicos as CoreGradosAcademicos, Secciones, ConfiguracionPlantel
 from apps.personal.models import AlumnoRepresentante, RepresentantesLegales, Profesores
 
 
@@ -1049,6 +1049,265 @@ def generar_pdf_informe_descriptivo(alumno_objeto, periodo_objeto, grupo_objeto)
         ('LINEBELOW', (2, 0), (2, 0), 0.8, colors.black),
     ]))
     story.append(firma_tabla)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+# ============================================================================
+# SERVICIO B: PDF DE LA CONSTANCIA DE PROSECUCIÓN FINAL (BOLETA DE JULIO)
+# ============================================================================
+
+def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
+    """
+    Genera la Constancia de Prosecución en el Nivel de Educación Primaria
+    (boleta oficial única de Julio) en PDF en memoria.
+
+    Args:
+        alumno_objeto: instancia de ``Alumnos``.
+        constancia_objeto: instancia de ``ConstanciaProsecucionFinal``.
+
+    El documento incluye:
+      - Membrete institucional (República Bolivariana de Venezuela,
+        Ministerio del Poder Popular para la Educación, E.B Creación San José,
+        Cod. DEA: OD12431208 | Calabozo - El Calvario).
+      - Título central en negrita: "CONSTANCIA DE PROSECUCIÓN EN EL NIVEL DE
+        EDUCACIÓN PRIMARIA".
+      - Redacción legal del formato con director, estudiante, literal final,
+        periodo escolar y grado de promoción.
+      - Bloque de expedición con la fecha de emisión.
+      - Cuadro de firmas paralelas de 3 columnas (Institución Educativa,
+        espacio de sello húmedo y Centro de Desarrollo de la Calidad
+        Educativa Estadal).
+
+    Retorna un ``io.BytesIO`` posicionado al inicio con el PDF listo para servir.
+    """
+    import io
+
+    from django.utils import timezone
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+    )
+
+    meses = (
+        'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+        'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+    )
+
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=2.5 * cm,
+        rightMargin=2.5 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2.5 * cm,
+        title=f"Constancia de Prosecución - {alumno_objeto}",
+        author="E.B Creación San José",
+        subject="Constancia de Prosecución en el Nivel de Educación Primaria",
+    )
+
+    # ---------- Estilos ----------
+    estilo_membrete_1 = ParagraphStyle(
+        'Membrete1', fontName='Helvetica-Bold', fontSize=13, leading=16,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_2 = ParagraphStyle(
+        'Membrete2', fontName='Helvetica', fontSize=11, leading=15,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_3 = ParagraphStyle(
+        'Membrete3', fontName='Helvetica-Bold', fontSize=12, leading=16,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_4 = ParagraphStyle(
+        'Membrete4', fontName='Helvetica', fontSize=9, leading=13,
+        alignment=TA_CENTER, textColor=colors.HexColor('#4a4a4a'),
+    )
+    estilo_titulo = ParagraphStyle(
+        'TituloConstancia', fontName='Helvetica-Bold', fontSize=13, leading=17,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'), spaceAfter=12,
+    )
+    estilo_cuerpo = ParagraphStyle(
+        'CuerpoConstancia', fontName='Helvetica', fontSize=11, leading=19,
+        alignment=TA_JUSTIFY, textColor=colors.HexColor('#222222'),
+        spaceAfter=8, firstLineIndent=36,
+    )
+    estilo_firma = ParagraphStyle(
+        'FirmaConstancia', fontName='Helvetica', fontSize=8.5, leading=12,
+        alignment=TA_CENTER, textColor=colors.HexColor('#333333'),
+    )
+
+    story = []
+
+    # ---------- MEMBRETE INSTITUCIONAL ----------
+    story.append(Paragraph("República Bolivariana de Venezuela", estilo_membrete_1))
+    story.append(Paragraph("Ministerio del Poder Popular para la Educación", estilo_membrete_2))
+    story.append(Paragraph("E.B Creación San José", estilo_membrete_3))
+    story.append(Paragraph("Cod. DEA: OD12431208 | Calabozo - El Calvario", estilo_membrete_4))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1a3a5c')))
+    story.append(Spacer(1, 14))
+
+    # ---------- TÍTULO CENTRAL ----------
+    story.append(Paragraph(
+        'CONSTANCIA DE PROSECUCIÓN EN EL NIVEL DE EDUCACIÓN PRIMARIA',
+        estilo_titulo,
+    ))
+    story.append(Spacer(1, 6))
+
+    # ---------- DATOS DEL DIRECTOR/A (ConfiguracionPlantel -> Profesores) ----------
+    director_nombre = '_______________________'
+    director_cedula = 'V.-__________'
+    try:
+        configuracion = ConfiguracionPlantel.objects.first()
+        if configuracion and configuracion.id_director_actual:
+            profesor_director = Profesores.objects.filter(
+                pk=configuracion.id_director_actual
+            ).first()
+            if profesor_director:
+                nombre_director = ' '.join(filter(None, [
+                    profesor_director.primer_nombre,
+                    profesor_director.segundo_nombre,
+                    profesor_director.primer_apellido,
+                    profesor_director.segundo_apellido,
+                ])).strip()
+                if nombre_director:
+                    director_nombre = nombre_director
+                cedula_director = (profesor_director.cedula or '').strip()
+                if cedula_director:
+                    if '-' in cedula_director:
+                        tipo_doc, numero_doc = cedula_director.split('-', 1)
+                        director_cedula = f'{tipo_doc.strip()}.-{numero_doc.strip()}'
+                    else:
+                        director_cedula = f'V.-{cedula_director}'
+    except Exception:  # nosec B101
+        logger.debug('Error resolviendo director del plantel para la constancia', exc_info=True)
+
+    # ---------- DATOS DEL ESTUDIANTE ----------
+    nombre_alumno = escape(' '.join(filter(None, [
+        alumno_objeto.primer_nombre,
+        alumno_objeto.segundo_nombre,
+        alumno_objeto.primer_apellido,
+        alumno_objeto.segundo_apellido,
+    ])).strip() or '_______________________')
+
+    cedula_alumno = escape(
+        alumno_objeto.cedula_escolar
+        or alumno_objeto.numero_documento_identidad
+        or '__________'
+    )
+    municipio_alumno = escape(
+        alumno_objeto.municipio_nacimiento
+        or alumno_objeto.lugar_nacimiento
+        or '__________'
+    )
+    estado_alumno = escape(alumno_objeto.entidad_federal_nacimiento or '__________')
+
+    fecha_nacimiento_texto = '__________'
+    if alumno_objeto.fecha_nacimiento:
+        fecha_nacimiento_texto = (
+            f'{alumno_objeto.fecha_nacimiento.day} de '
+            f'{meses[alumno_objeto.fecha_nacimiento.month - 1]} de '
+            f'{alumno_objeto.fecha_nacimiento.year}'
+        )
+
+    # Grado cursado: vía mejor inscripción -> grupo -> grado (Alumnos no tiene
+    # FK directas de grado/sección tras la consolidación de estudiantes).
+    grado_cursado = '__________'
+    try:
+        inscripcion_referencia = _inscripcion_referencia_alumno(alumno_objeto)
+        if inscripcion_referencia is not None and inscripcion_referencia.grupo_id:
+            grado_cursado = (
+                inscripcion_referencia.grupo.grado.nombre_grado or '__________'
+            )
+    except Exception:  # nosec B101
+        logger.debug(
+            'Error resolviendo grado cursado del alumno %s para la constancia',
+            getattr(alumno_objeto, 'pk', None), exc_info=True,
+        )
+
+    def _frase_grado(valor):
+        """'Primer Grado' -> 'Primer Grado'; '1' -> '1 Grado' (cierra la frase)."""
+        texto = str(valor or '__________').strip()
+        if 'grado' in texto.lower():
+            return texto
+        return f'{texto} Grado'
+
+    literal_final = escape(str(constancia_objeto.literal_final or '____'))
+    periodo_escolar = escape(str(constancia_objeto.periodo_escolar or '__________'))
+    siguiente_grado = escape(_frase_grado(constancia_objeto.promovido_al_grado))
+    grado_cursado_frase = escape(_frase_grado(grado_cursado))
+
+    # ---------- REDACCIÓN LEGAL DEL CUERPO ----------
+    cuerpo_texto = (
+        f'Quien suscribe <b>{escape(director_nombre)}</b>, titular de la Cédula de '
+        f'Identidad N° {escape(director_cedula)}, Director(a) de la Institución '
+        'Educativa E.B Creación San José, ubicada en el Municipio Francisco de '
+        'Miranda de la Parroquia Calabozo adscrita al Centro de Desarrollo de la '
+        'Calidad Educativa Estadal... <br/><br/>'
+        f'Hace constar que el (la) estudiante <b>{nombre_alumno}</b>, titular de la '
+        f'Cédula Escolar/C.I. N° {cedula_alumno}, nacido (a) en el Municipio '
+        f'{municipio_alumno} del Estado {estado_alumno}, en fecha '
+        f'{fecha_nacimiento_texto}, cursó el {grado_cursado_frase}, '
+        f'correspondiéndole el literal <b>{literal_final}</b> durante el periodo '
+        f'escolar {periodo_escolar}, siendo promovido (a) al '
+        f'<b>{siguiente_grado}</b> del Nivel de Educación Primaria.'
+    )
+    story.append(Paragraph(cuerpo_texto, estilo_cuerpo))
+    story.append(Spacer(1, 8))
+
+    # ---------- BLOQUE DE VALIDACIÓN DE EXPEDICIÓN ----------
+    fecha_expedicion = constancia_objeto.fecha_expedicion or timezone.localdate()
+    expedicion_texto = (
+        f'Constancia que se expide en Calabozo, a los {fecha_expedicion.day} días '
+        f'del mes de {meses[fecha_expedicion.month - 1]} de {fecha_expedicion.year}.'
+    )
+    story.append(Paragraph(expedicion_texto, estilo_cuerpo))
+    story.append(Spacer(1, 44))
+
+    # ---------- CUADRO DE FIRMAS PARALELAS (3 COLUMNAS) ----------
+    celda_institucion = Paragraph(
+        '<b>INSTITUCIÓN EDUCATIVA</b><br/>'
+        '________________________________<br/>'
+        f'{escape(director_nombre)}<br/>'
+        f'N° C.I. {escape(director_cedula)}<br/>'
+        'Firma y Sello',
+        estilo_firma,
+    )
+    celda_sello = Paragraph('Sello Húmedo<br/><br/><br/>', estilo_firma)
+    celda_cdcee = Paragraph(
+        '<b>CENTRO DE DESARROLLO DE LA CALIDAD<br/>'
+        'EDUCATIVA ESTADAL</b><br/>'
+        '________________________________<br/>'
+        'Nombre y Apellido:<br/>'
+        'N° C.I.:<br/>'
+        'Firma y Sello',
+        estilo_firma,
+    )
+
+    tabla_firmas = Table(
+        [[celda_institucion, celda_sello, celda_cdcee]],
+        colWidths=[6.5 * cm, 3 * cm, 6.5 * cm],
+    )
+    tabla_firmas.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('LINEABOVE', (0, 0), (0, 0), 0.8, colors.black),
+        ('LINEABOVE', (2, 0), (2, 0), 0.8, colors.black),
+    ]))
+    story.append(tabla_firmas)
 
     doc.build(story)
     buffer.seek(0)

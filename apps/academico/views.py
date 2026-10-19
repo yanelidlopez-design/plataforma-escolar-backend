@@ -14,7 +14,7 @@ from django.db import IntegrityError
 from django.db.models import ProtectedError, Prefetch
 import logging
 import re
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion, ConstanciaProsecucionFinal
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
@@ -35,11 +35,12 @@ from .reports import (
     INSCRIPCIONES_EXPORT_ENCABEZADOS, INSCRIPCIONES_PDF_COLUMNAS,
     _crear_estilos_comprobante, _separar_documento, _texto_seguro, _tabla_clave_valor,
     generar_pdf_informe_descriptivo,
+    generar_pdf_constancia_prosecucion,
 )
 from .services.inscripcion_service import generar_comprobante_inscripcion
 from .services.webhook_service import procesar_alumno_webhook, procesar_inscripcion_webhook
 from .tasks import encolar_exportacion, leer_estado_reporte, ruta_archivo_reporte
-from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones
+from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones, PeriodosAcademicos
 from apps.core.serializers import GradosAcademicosSerializer, SeccionesSerializer
 from apps.personal.models import Profesores
 
@@ -1676,4 +1677,110 @@ class RegistrarConstanciaProsecucionAPIView(APIView):
             {'success': False, 'errors': serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class DescargaConstanciaProsecucionAPIView(APIView):
+    """
+    Endpoint administrativo para descargar la Constancia de Prosecución Final
+    (boleta oficial única de Julio) en PDF.
+
+    - GET /api/academico/calificaciones/prosecucion-final-pdf/<int:alumno_id>/
+
+    Recupera al alumno y su constancia correspondiente al año escolar actual
+    (periodo académico activo en ``periodos_academicos``) y delega el
+    renderizado al motor de ReportLab. Requiere autenticación JWT
+    (IsAuthenticated): uso exclusivo del personal administrativo y de la
+    Dirección de la escuela desde la plataforma escolar.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, alumno_id, *args, **kwargs):
+        try:
+            alumno = Alumnos.objects.get(pk=alumno_id)
+        except Alumnos.DoesNotExist:
+            logger.debug('Alumno no encontrado para constancia: id=%s', alumno_id, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.debug('Error buscando alumno para constancia: id=%s', alumno_id, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error al buscar el alumno.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Año escolar actual desde el periodo académico activo
+        # (ej: "Año Escolar 2026-2027" -> "2026-2027", formato que espera
+        # el campo periodo_escolar de la constancia).
+        anio_escolar = None
+        try:
+            periodo_activo = PeriodosAcademicos.objects.filter(
+                activo=True
+            ).order_by('-fecha_inicio').first()
+            if periodo_activo:
+                coincidencia = re.search(
+                    r'(\d{4}-\d{4})',
+                    f'{periodo_activo.nombre_periodo} {periodo_activo.codigo_periodo}',
+                )
+                if coincidencia:
+                    anio_escolar = coincidencia.group(1)
+        except Exception:
+            logger.debug('Error resolviendo el año escolar activo', exc_info=True)
+
+        try:
+            queryset = ConstanciaProsecucionFinal.objects.filter(alumno=alumno)
+            if anio_escolar:
+                constancia = queryset.filter(periodo_escolar=anio_escolar).first()
+            else:
+                # Sin periodo activo determinable: última constancia emitida.
+                constancia = queryset.order_by('-fecha_expedicion', '-id').first()
+        except Exception:
+            logger.debug(
+                'Error buscando constancia del alumno id=%s (año escolar %s)',
+                alumno_id, anio_escolar, exc_info=True,
+            )
+            return Response(
+                {'success': False, 'error': 'Error al buscar la constancia.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        if constancia is None:
+            logger.debug(
+                'Constancia no encontrada: alumno id=%s año escolar=%s',
+                alumno_id, anio_escolar, exc_info=True,
+            )
+            return Response(
+                {
+                    'success': False,
+                    'error': 'No existe constancia de prosecución final para '
+                             'este alumno en el año escolar actual.',
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            pdf_buffer = generar_pdf_constancia_prosecucion(alumno, constancia)
+        except Exception:
+            logger.debug(
+                'Error generando PDF de constancia alumno=%s constancia=%s',
+                alumno_id, getattr(constancia, 'pk', None), exc_info=True,
+            )
+            return Response(
+                {'success': False, 'error': 'No se pudo generar la constancia PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        cedula = (
+            alumno.cedula_escolar or alumno.numero_documento_identidad or alumno_id
+        )
+        filename = f"Constancia_Prosecucion_{cedula}.pdf"
+
+        response = FileResponse(
+            pdf_buffer,
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
