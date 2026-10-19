@@ -32,7 +32,8 @@ from .reports import (
     exportar_asistencias_excel, exportar_asistencias_pdf, exportar_asistencias_csv,
     ALUMNOS_EXPORT_ENCABEZADOS, ALUMNOS_PDF_COLUMNAS,
     INSCRIPCIONES_EXPORT_ENCABEZADOS, INSCRIPCIONES_PDF_COLUMNAS,
-    _crear_estilos_comprobante, _separar_documento, _texto_seguro, _tabla_clave_valor
+    _crear_estilos_comprobante, _separar_documento, _texto_seguro, _tabla_clave_valor,
+    generar_pdf_informe_descriptivo,
 )
 from .services.inscripcion_service import generar_comprobante_inscripcion
 from .services.webhook_service import procesar_alumno_webhook, procesar_inscripcion_webhook
@@ -1534,3 +1535,96 @@ class ConfiguracionPeriodoCalificacionViewSet(viewsets.ModelViewSet):
                 'No se puede eliminar el periodo porque tiene calificaciones registradas.'
             )
 
+
+
+class DescargaInformeDescriptivoAPIView(APIView):
+    """
+    Endpoint administrativo para descargar el Informe Descriptivo Trimestral
+    de un alumno en un lapso de calificación determinado.
+
+    - GET /api/academico/calificaciones/informe-lapso-pdf/<int:alumno_id>/<int:periodo_id>/
+
+    Requiere autenticación JWT (IsAuthenticated): uso exclusivo del personal
+    administrativo de la plataforma escolar.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        id_alumno = kwargs.get('alumno_id') or request.query_params.get('id_alumno')
+        id_periodo = kwargs.get('periodo_id') or request.query_params.get('id_periodo')
+
+        if not id_alumno or not id_periodo:
+            return Response(
+                {'success': False, 'error': 'Se requieren id_alumno e id_periodo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            alumno = Alumnos.objects.get(pk=id_alumno)
+        except Alumnos.DoesNotExist:
+            logger.debug('Alumno no encontrado: id=%s', id_alumno, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.debug('Error buscando alumno id=%s', id_alumno, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error al buscar el alumno.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            periodo = PeriodoCalificacion.objects.get(pk=id_periodo)
+        except PeriodoCalificacion.DoesNotExist:
+            logger.debug('Periodo no encontrado: id=%s', id_periodo, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Periodo de calificación no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception:
+            logger.debug('Error buscando periodo id=%s', id_periodo, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error al buscar el periodo.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Obtener el grupo del alumno a través de sus evaluaciones en el lapso.
+        grupo = None
+        try:
+            ev = EvaluacionLapsoCriterio.objects.filter(
+                alumno=alumno, periodo=periodo
+            ).select_related('criterio__grupo').first()
+            if ev:
+                grupo = ev.criterio.grupo
+        except Exception:
+            logger.debug(
+                'Error obteniendo grupo del alumno %s en periodo %s',
+                id_alumno, id_periodo, exc_info=True,
+            )
+
+        try:
+            pdf_buffer = generar_pdf_informe_descriptivo(alumno, periodo, grupo)
+        except Exception:
+            logger.debug(
+                'Error generando PDF informe descriptivo alumno=%s periodo=%s',
+                id_alumno, id_periodo, exc_info=True,
+            )
+            return Response(
+                {'success': False, 'error': 'No se pudo generar el informe PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        cedula = (
+            alumno.cedula_escolar or alumno.numero_documento_identidad or id_alumno
+        )
+        lapso = periodo.numero_periodo
+        filename = f"Informe_Descriptivo_{cedula}_Lapso{lapso}.pdf"
+
+        response = FileResponse(
+            pdf_buffer,
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response

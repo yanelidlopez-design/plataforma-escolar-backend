@@ -3,6 +3,7 @@ Report generation module for academico app.
 Contains all export functions (Excel, PDF, CSV) for students, enrollments, and attendance.
 """
 import csv
+import logging
 from django.http import HttpResponse
 from django.db.models import ProtectedError
 from openpyxl import Workbook
@@ -13,9 +14,20 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from html import escape  # escapado de texto para Paragraph (sin parseo XML)
-from .models import Alumnos, GruposAcademicos, Inscripciones, Asistencias
+from .models import (
+    Alumnos,
+    GruposAcademicos,
+    Inscripciones,
+    Asistencias,
+    PeriodoCalificacion,
+    CriterioEvaluacion,
+    EvaluacionLapsoCriterio,
+)
 from apps.core.models import GradosAcademicos as CoreGradosAcademicos, Secciones
+from apps.personal.models import AlumnoRepresentante, RepresentantesLegales, Profesores
 
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # STUDENT EXPORT CONSTANTS
@@ -765,3 +777,279 @@ def exportar_asistencias_pdf(queryset, fecha_inicio=None, fecha_fin=None):
 
     doc.build(story)
     return response
+
+
+# ============================================================================
+# INFORME DESCRIPTIVO TRIMESTRAL (ReportLab)
+# ============================================================================
+
+def generar_pdf_informe_descriptivo(alumno_objeto, periodo_objeto, grupo_objeto):
+    """
+    Genera el Informe Descriptivo Trimestral en PDF (Diciembre, Abril o Julio)
+    para un alumno, periodo y grupo dados.
+
+    El documento incluye:
+      - Membrete institucional (República Bolivariana de Venezuela,
+        Ministerio del Poder Popular para la Educación, E.B Creación San José,
+        Cod. DEA: OD12431208 | Calabozo - El Calvario).
+      - Datos del estudiante y su representante legal.
+      - Tabla dinámica de criterios cualitativos evaluados en el lapso.
+      - Bloque de sugerencias del docente y espacios de firma (Docente del Grado
+        y Directora) con espacio para sello húmedo.
+
+    Retorna un io.BytesIO posicionado al inicio con el PDF listo para servir.
+    """
+    import io
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+    )
+
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=2 * cm,
+        rightMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+        title=f"Informe Descriptivo - {alumno_objeto}",
+        author="E.B Creación San José",
+        subject="Informe Descriptivo Trimestral",
+    )
+
+    # ---------- Estilos ----------
+    estilo_membrete_1 = ParagraphStyle(
+        'Membrete1', fontName='Helvetica-Bold', fontSize=13, leading=16,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_2 = ParagraphStyle(
+        'Membrete2', fontName='Helvetica', fontSize=11, leading=15,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_3 = ParagraphStyle(
+        'Membrete3', fontName='Helvetica-Bold', fontSize=12, leading=16,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+    )
+    estilo_membrete_4 = ParagraphStyle(
+        'Membrete4', fontName='Helvetica', fontSize=9, leading=13,
+        alignment=TA_CENTER, textColor=colors.HexColor('#4a4a4a'),
+    )
+    estilo_titulo = ParagraphStyle(
+        'Titulo', fontName='Helvetica-Bold', fontSize=14, leading=18,
+        alignment=TA_CENTER, textColor=colors.HexColor('#1a3a5c'),
+        spaceAfter=10,
+    )
+    estilo_etiqueta = ParagraphStyle(
+        'DatoEtiqueta', fontName='Helvetica-Bold', fontSize=10, leading=13,
+        alignment=TA_LEFT, textColor=colors.HexColor('#333333'),
+    )
+    estilo_valor = ParagraphStyle(
+        'DatoValor', fontName='Helvetica', fontSize=10, leading=13,
+        alignment=TA_LEFT, textColor=colors.HexColor('#000000'),
+    )
+    estilo_tabla_enc = ParagraphStyle(
+        'TablaEnc', fontName='Helvetica-Bold', fontSize=9, leading=12,
+        alignment=TA_CENTER, textColor=colors.white,
+    )
+    estilo_tabla_celda = ParagraphStyle(
+        'TablaCelda', fontName='Helvetica', fontSize=9, leading=12,
+        alignment=TA_LEFT, textColor=colors.HexColor('#000000'),
+    )
+    estilo_sugerencias = ParagraphStyle(
+        'Sugerencias', fontName='Helvetica', fontSize=10, leading=14,
+        alignment=TA_JUSTIFY, textColor=colors.HexColor('#333333'),
+    )
+    estilo_firma = ParagraphStyle(
+        'Firma', fontName='Helvetica-Bold', fontSize=9, leading=12,
+        alignment=TA_CENTER, textColor=colors.HexColor('#333333'),
+    )
+
+    story = []
+
+    # ---------- MEMBRETE INSTITUCIONAL ----------
+    story.append(Paragraph("República Bolivariana de Venezuela", estilo_membrete_1))
+    story.append(Paragraph("Ministerio del Poder Popular para la Educación", estilo_membrete_2))
+    story.append(Paragraph("E.B Creación San José", estilo_membrete_3))
+    story.append(Paragraph("Cod. DEA: OD12431208 | Calabozo - El Calvario", estilo_membrete_4))
+    story.append(Spacer(1, 8))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#1a3a5c')))
+    story.append(Spacer(1, 14))
+
+    # ---------- TÍTULO ----------
+    lapso_nombre = dict(PeriodoCalificacion.NUMERO_PERIODO_CHOICES).get(
+        periodo_objeto.numero_periodo, f"Lapso {periodo_objeto.numero_periodo}"
+    )
+    story.append(Paragraph(f"Informe Descriptivo Trimestral - {lapso_nombre}", estilo_titulo))
+    story.append(Spacer(1, 10))
+
+    # ---------- DATOS DEL ESTUDIANTE Y REPRESENTANTE ----------
+    nombre_completo = (
+        f"{alumno_objeto.primer_nombre} {alumno_objeto.segundo_nombre or ''} "
+        f"{alumno_objeto.primer_apellido} {alumno_objeto.segundo_apellido or ''}"
+    ).strip()
+
+    grado_nombre = (
+        grupo_objeto.grado.nombre_grado
+        if grupo_objeto and grupo_objeto.grado_id else 'N/A'
+    )
+    seccion_nombre = (
+        grupo_objeto.seccion.nombre_seccion
+        if grupo_objeto and grupo_objeto.seccion_id else 'N/A'
+    )
+
+    representante_nombre = 'No asignado'
+    try:
+        ar = AlumnoRepresentante.objects.filter(
+            alumno=alumno_objeto, es_principal=True
+        ).select_related('representante').first()
+        if ar and ar.representante:
+            rep = ar.representante
+            representante_nombre = (
+                f"{rep.primer_nombre} {rep.segundo_nombre or ''} "
+                f"{rep.primer_apellido} {rep.segundo_apellido or ''}"
+            ).strip()
+    except Exception:  # nosec B101
+        logger.debug(
+            'Error obteniendo representante del alumno %s',
+            getattr(alumno_objeto, 'pk', None), exc_info=True,
+        )
+
+    datos_estudiante = [
+        [Paragraph('Nombre del Estudiante', estilo_etiqueta),
+         Paragraph(nombre_completo, estilo_valor)],
+        [Paragraph('Cédula Escolar / C.I.', estilo_etiqueta),
+         Paragraph(
+             alumno_objeto.cedula_escolar
+             or alumno_objeto.numero_documento_identidad
+             or 'N/A', estilo_valor)],
+        [Paragraph('Grado', estilo_etiqueta), Paragraph(grado_nombre, estilo_valor)],
+        [Paragraph('Sección', estilo_etiqueta), Paragraph(seccion_nombre, estilo_valor)],
+        [Paragraph('Representante Legal', estilo_etiqueta),
+         Paragraph(representante_nombre, estilo_valor)],
+    ]
+
+    tabla_datos = Table(datos_estudiante, colWidths=[4.6 * cm, 10.4 * cm])
+    tabla_datos.setStyle(TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#eef2f7')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(tabla_datos)
+    story.append(Spacer(1, 14))
+
+    # ---------- TABLA DINÁMICA DE CRITERIOS ----------
+    story.append(Paragraph(
+        'Evaluación de Criterios de Aprendizaje',
+        ParagraphStyle(
+            'SubtituloTabla', parent=estilo_etiqueta, fontSize=11,
+            spaceAfter=6, textColor=colors.HexColor('#1a3a5c'),
+        ),
+    ))
+
+    indicador_display = dict(EvaluacionLapsoCriterio.INDICADOR_CHOICES)
+
+    evaluaciones = EvaluacionLapsoCriterio.objects.filter(
+        alumno=alumno_objeto, periodo=periodo_objeto
+    ).select_related('criterio').order_by('criterio__materia_nombre')
+
+    datos_tabla = [
+        [Paragraph('Criterio de Aprendizaje', estilo_tabla_enc),
+         Paragraph('Indicador (PL, L, PM, EP, I)', estilo_tabla_enc)],
+    ]
+
+    sugerencias_list = []
+    for ev in evaluaciones:
+        datos_tabla.append([
+            Paragraph(
+                f"{ev.criterio.materia_nombre} - {ev.criterio.descripcion_criterio}",
+                estilo_tabla_celda,
+            ),
+            Paragraph(
+                f"{ev.indicador} - {indicador_display.get(ev.indicador, ev.indicador)}",
+                estilo_tabla_celda,
+            ),
+        ])
+        if ev.sugerencias and ev.sugerencias.strip():
+            sugerencias_list.append(
+                f"• {ev.criterio.materia_nombre}: {ev.sugerencias.strip()}"
+            )
+
+    tabla_criterios = Table(datos_tabla, colWidths=[11 * cm, 5 * cm])
+    tabla_criterios.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a3a5c')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#999999')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+    ]))
+    story.append(tabla_criterios)
+    story.append(Spacer(1, 14))
+
+    # ---------- BLOQUE DE SUGERENCIAS ----------
+    if sugerencias_list:
+        story.append(Paragraph(
+            'Sugerencias del Docente',
+            ParagraphStyle(
+                'SubtituloSugerencias', parent=estilo_etiqueta, fontSize=11,
+                spaceAfter=6, textColor=colors.HexColor('#1a3a5c'),
+            ),
+        ))
+        sugerencias_texto = '<br/>'.join(sugerencias_list)
+        story.append(Paragraph(sugerencias_texto, estilo_sugerencias))
+        story.append(Spacer(1, 14))
+
+    # ---------- BLOQUE DE FIRMAS ----------
+    docente_nombre = 'Docente del Grado'
+    docente_cedula = ''
+    if grupo_objeto and grupo_objeto.profesor_director_id:
+        pd = grupo_objeto.profesor_director
+        docente_nombre = (
+            f"{pd.primer_nombre} {pd.segundo_nombre or ''} "
+            f"{pd.primer_apellido} {pd.segundo_apellido or ''}"
+        ).strip()
+        docente_cedula = pd.cedula or ''
+
+    firma_tabla = Table([
+        [
+            Paragraph(
+                f'Docente del Grado<br/>{docente_nombre}'
+                f'{("<br/>" + docente_cedula) if docente_cedula else ""}',
+                estilo_firma,
+            ),
+            Paragraph(
+                'Sello Húmedo<br/>de la Institución<br/><br/>'
+                'E.B Creación San José', estilo_firma,
+            ),
+            Paragraph(
+                'Directora<br/>_______________________<br/>C.I. _______________',
+                estilo_firma,
+            ),
+        ],
+    ], colWidths=[6 * cm, 6 * cm, 6 * cm])
+    firma_tabla.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 26),
+        ('LINEBELOW', (0, 0), (0, 0), 0.8, colors.black),
+        ('LINEBELOW', (2, 0), (2, 0), 0.8, colors.black),
+    ]))
+    story.append(firma_tabla)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
