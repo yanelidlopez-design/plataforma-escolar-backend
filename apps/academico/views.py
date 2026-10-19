@@ -23,6 +23,7 @@ from .serializers import (
     PeriodoCalificacionSerializer,
     CargaMasivaCalificacionesSerializer,
     CargaMasivaCriteriosSerializer,
+    ConstanciaProsecucionFinalSerializer,
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
@@ -1641,3 +1642,38 @@ class DescargaInformeDescriptivoAPIView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+# ============================================================================
+# SERVICIO B: CONSTANCIA DE PROSECUCIÓN FINAL (VEREDICTO ANUAL DE JULIO)
+# ============================================================================
+
+class RegistrarConstanciaProsecucionAPIView(APIView):
+    """
+    Registro administrativo de la Constancia de Prosecución Final.
+
+    Guarda en MariaDB el veredicto definitivo anual del alumno emitido en
+    Julio (literal final A-E y grado de promoción). Uso exclusivo del
+    personal administrativo y de la Dirección de la escuela desde la
+    plataforma escolar: requiere autenticación JWT (IsAuthenticated).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ConstanciaProsecucionFinalSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Constancia de prosecución final registrada correctamente.',
+                    'constancia': serializer.data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            {'success': False, 'errors': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+

@@ -10,6 +10,7 @@ from .views import (
     PeriodoInscripcionListCreateAPIView, PeriodoInscripcionDetailAPIView,
     CargaCalificacionesDocenteExternaAPIView, CargaCriteriosDocenteExternaAPIView,
     DescargaInformeDescriptivoAPIView, ConfiguracionPeriodoCalificacionViewSet,
+    RegistrarConstanciaProsecucionAPIView,
 )
 
 router = DefaultRouter()
@@ -30,6 +31,7 @@ urlpatterns = [
     path('calificaciones/cargar-externa/', CargaCalificacionesDocenteExternaAPIView.as_view(), name='carga_calificaciones_externa'),
     path('calificaciones/cargar-criterios-externa/', CargaCriteriosDocenteExternaAPIView.as_view(), name='carga_criterios_externa'),
     path('calificaciones/informe-lapso-pdf/<int:alumno_id>/<int:periodo_id>/', DescargaInformeDescriptivoAPIView.as_view(), name='descarga_informe_descriptivo'),
+    path('calificaciones/prosecucion-final/', RegistrarConstanciaProsecucionAPIView.as_view(), name='registrar_constancia_prosecucion_final'),
     path('periodos/', PeriodoInscripcionListCreateAPIView.as_view(), name='listar_periodos'),
     path('periodos/<int:pk>/', PeriodoInscripcionDetailAPIView.as_view(), name='detalle_periodo'),
     path('periodos/<int:pk>/alternar-estado/', AlternarUrlInscripcionAPIView.as_view(), name='alternar_estado_periodo'),

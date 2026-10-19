@@ -14,6 +14,7 @@ from .models import (
     PeriodoCalificacion,
     CriterioEvaluacion,
     EvaluacionLapsoCriterio,
+    ConstanciaProsecucionFinal,
 )
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
@@ -918,3 +919,44 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
             'actualizadas': actualizadas,
             'total': len(items),
         }
+
+
+class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
+    """
+    Veredicto definitivo anual de Julio: literal final (A-E) y grado al que
+    se promueve al alumno.
+
+    Hereda de ModelSerializer las validaciones nativas del modelo
+    ``ConstanciaProsecucionFinal``:
+    - RegexValidator ``^[A-E]$$`` sobre ``literal_final`` (letras A-E).
+    - Restricción única de un solo registro por alumno y periodo escolar
+      (``unique_together``), aplicado por DRF como UniqueTogetherValidator.
+    """
+
+    class Meta:
+        model = ConstanciaProsecucionFinal
+        fields = ['id', 'alumno', 'periodo_escolar', 'literal_final', 'promovido_al_grado']
+
+    def create(self, validated_data):
+        # Auditoría: la unicidad (alumno + periodo) puede fallar por una
+        # carrera concurrente entre hilos (IntegrityError en MariaDB) aunque
+        # UniqueTogetherValidator ya haya pasado en la validación.
+        try:
+            return super().create(validated_data)
+        except IntegrityError:
+            logger.debug(
+                'Duplicado de constancia de prosecución final para alumno %s '
+                '(periodo escolar %s)',
+                validated_data.get('alumno'),
+                validated_data.get('periodo_escolar'),
+                exc_info=True,
+            )
+            raise serializers.ValidationError(
+                {
+                    'non_field_errors': [
+                        'Ya existe una constancia de prosecución final para '
+                        'este alumno en el periodo escolar indicado.'
+                    ]
+                }
+            )
+
