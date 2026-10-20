@@ -369,6 +369,7 @@ class EvaluacionLapsoCriterio(models.Model):
         'CriterioEvaluacion',
         on_delete=models.CASCADE,
         db_column='id_criterio',
+        related_name='evaluacionlapso',
     )
     periodo = models.ForeignKey(
         PeriodoCalificacion,

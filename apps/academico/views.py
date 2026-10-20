@@ -13,8 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError, Prefetch
 import logging
-import re
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion, ConstanciaProsecucionFinal
+from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
@@ -30,17 +29,35 @@ from .decorators import validate_webhook_signature
 from .reports import (
     exportar_alumnos_excel, exportar_alumnos_pdf, exportar_alumnos_csv,
     exportar_inscripciones_excel, exportar_inscripciones_pdf, exportar_inscripciones_csv,
-    exportar_asistencias_excel, exportar_asistencias_pdf, exportar_asistencias_csv,
+    exportar_asistencias_excel as generar_asistencias_excel,
+    exportar_asistencias_pdf as generar_asistencias_pdf,
+    exportar_asistencias_csv as generar_asistencias_csv,
     ALUMNOS_EXPORT_ENCABEZADOS, ALUMNOS_PDF_COLUMNAS,
     INSCRIPCIONES_EXPORT_ENCABEZADOS, INSCRIPCIONES_PDF_COLUMNAS,
     _crear_estilos_comprobante, _separar_documento, _texto_seguro, _tabla_clave_valor,
-    generar_pdf_informe_descriptivo,
-    generar_pdf_constancia_prosecucion,
 )
 from .services.inscripcion_service import generar_comprobante_inscripcion
 from .services.webhook_service import procesar_alumno_webhook, procesar_inscripcion_webhook
+from .services.asistencias_service import AsistenciasService
+from .services.calificaciones_service import (
+    CalificacionesService,
+    CalificacionesServiceError,
+    GrupoSinCriteriosError,
+)
+from .services.periodo_acceso_service import (
+    PeriodoAccesoService,
+    PeriodoCerradoError,
+    TokenInvalidoError,
+)
+from .services.reportes_service import (
+    ReportesService,
+    AlumnoNoEncontradoError,
+    ConstanciaNoEncontradaError,
+    PeriodoNoEncontradoError,
+    ReporteError,
+)
 from .tasks import encolar_exportacion, leer_estado_reporte, ruta_archivo_reporte
-from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones, PeriodosAcademicos
+from apps.core.models import ConfiguracionPlantel, GradosAcademicos, Secciones
 from apps.core.serializers import GradosAcademicosSerializer, SeccionesSerializer
 from apps.personal.models import Profesores
 
@@ -499,52 +516,19 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
 
         - Paginación deshabilitada: al filtrar por grupo/fecha se retorna el listado
           completo en un solo paso (los grupos tardan 35-40 alumnos, sin necesidad de páginas).
-        - Valores inválidos se ignoran limpiamente para no romper la BD legacy.
-        - select_related elimina las consultas N+1 al serializar.
+        - El saneo de valores inválidos (fecha, enteros, estado) y el
+          select_related sin N+1 los aplica AsistenciasService.
         """
-        qs = super().get_queryset()
-
         # --- Paginación: ignorar cualquier paginación global y devolver el listado completo ---
         self.pagination_class = None
 
         params = self.request.query_params
-
-        # --- fecha (YYYY-MM-DD) ---
-        fecha = (params.get('fecha') or '').strip()
-        if fecha:
-            try:
-                datetime.strptime(fecha, '%Y-%m-%d')
-            except ValueError:
-                fecha = ''  # formato inválido -> se ignora limpiamente
-        if fecha:
-            qs = qs.filter(fecha=fecha)
-
-        # --- grupo / alumno (enteros) ---
-        for param, campo in (('grupo', 'grupo_id'), ('alumno', 'alumno_id')):
-            valor = (params.get(param) or '').strip()
-            if valor:
-                try:
-                    qs = qs.filter(**{campo: int(valor)})
-                except (ValueError, TypeError):
-                    pass  # no numérico -> se ignora limpiamente
-
-        # --- estado (solo P/A/J válidos) ---
-        estado = (params.get('estado') or '').strip().upper()
-        estados_validos = {codigo for codigo, _ in Asistencias.ESTADO_CHOICES}
-        if estado in estados_validos:
-            qs = qs.filter(estado=estado)
-
-        # --- Optimización N+1: carga directa de alumno y grupo con relaciones anidadas ---
-        # El serializer necesita: alumno.*, grupo.*, grupo.id_grado.*, grupo.id_seccion.*
-        qs = qs.select_related(
-            'alumno',
-            'grupo',
-            'grupo__grado',
-            'grupo__seccion',
-            'profesor_registro'
+        return AsistenciasService.obtener_queryset_filtrado(
+            grupo_id=params.get('grupo'),
+            alumno_id=params.get('alumno'),
+            fecha=params.get('fecha'),
+            estado=params.get('estado'),
         )
-
-        return qs
 
 
     @swagger_auto_schema(
@@ -569,43 +553,25 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
         if not grupo_id:
             return Response({'error': 'Parámetro grupo_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-        queryset = self.queryset.filter(grupo_id=grupo_id)
+        # 1 solo SQL: filtrado + agregación (antes 4 .count() secuenciales).
+        queryset = AsistenciasService.obtener_queryset_filtrado(
+            grupo_id=grupo_id,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+        estadisticas = AsistenciasService.calcular_estadisticas_asistencia(queryset)
 
-        if fecha_inicio:
-            queryset = queryset.filter(fecha__gte=fecha_inicio)
-        if fecha_fin:
-            queryset = queryset.filter(fecha__lte=fecha_fin)
-
-        total_registros = queryset.count()
-        if total_registros == 0:
+        if estadisticas['total_dias'] == 0:
             return Response({
                 'mensaje': 'No hay registros de asistencia para este grupo en el rango de fechas',
-                'estadisticas': {
-                    'total_dias': 0,
-                    'presentes': 0,
-                    'ausentes': 0,
-                    'justificados': 0,
-                    'porcentaje_asistencia': 0
-                }
+                'estadisticas': estadisticas,
             })
-
-        presentes = queryset.filter(estado='P').count()
-        ausentes = queryset.filter(estado='A').count()
-        justificados = queryset.filter(estado='J').count()
-
-        porcentaje_asistencia = round((presentes / total_registros) * 100, 2) if total_registros > 0 else 0
 
         return Response({
             'grupo_id': grupo_id,
             'fecha_inicio': fecha_inicio,
             'fecha_fin': fecha_fin,
-            'estadisticas': {
-                'total_dias': total_registros,
-                'presentes': presentes,
-                'ausentes': ausentes,
-                'justificados': justificados,
-                'porcentaje_asistencia': porcentaje_asistencia
-            }
+            'estadisticas': estadisticas,
         })
 
     @swagger_auto_schema(
@@ -626,43 +592,25 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
         if not alumno_id:
             return Response({'error': 'Parámetro alumno_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-        queryset = self.queryset.filter(alumno_id=alumno_id)
+        # 1 solo SQL: filtrado + agregación (antes 4 .count() secuenciales).
+        queryset = AsistenciasService.obtener_queryset_filtrado(
+            alumno_id=alumno_id,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+        estadisticas = AsistenciasService.calcular_estadisticas_asistencia(queryset)
 
-        if fecha_inicio:
-            queryset = queryset.filter(fecha__gte=fecha_inicio)
-        if fecha_fin:
-            queryset = queryset.filter(fecha__lte=fecha_fin)
-
-        total_registros = queryset.count()
-        if total_registros == 0:
+        if estadisticas['total_dias'] == 0:
             return Response({
                 'mensaje': 'No hay registros de asistencia para este alumno',
-                'estadisticas': {
-                    'total_dias': 0,
-                    'presentes': 0,
-                    'ausentes': 0,
-                    'justificados': 0,
-                    'porcentaje_asistencia': 0
-                }
+                'estadisticas': estadisticas,
             })
-
-        presentes = queryset.filter(estado='P').count()
-        ausentes = queryset.filter(estado='A').count()
-        justificados = queryset.filter(estado='J').count()
-
-        porcentaje_asistencia = round((presentes / total_registros) * 100, 2) if total_registros > 0 else 0
 
         return Response({
             'alumno_id': alumno_id,
             'fecha_inicio': fecha_inicio,
             'fecha_fin': fecha_fin,
-            'estadisticas': {
-                'total_dias': total_registros,
-                'presentes': presentes,
-                'ausentes': ausentes,
-                'justificados': justificados,
-                'porcentaje_asistencia': porcentaje_asistencia
-            }
+            'estadisticas': estadisticas,
         })
 
 @swagger_auto_schema(
@@ -679,21 +627,12 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def exportar_asistencias_csv(request):
-    grupo_id = request.query_params.get('grupo_id')
-    fecha_inicio = request.query_params.get('fecha_inicio')
-    fecha_fin = request.query_params.get('fecha_fin')
-
-    queryset = Asistencias.objects.select_related('alumno', 'grupo', 'grupo__grado', 'grupo__seccion')
-
-    if grupo_id:
-        queryset = queryset.filter(grupo_id=grupo_id)
-    if fecha_inicio:
-        queryset = queryset.filter(fecha__gte=fecha_inicio)
-    if fecha_fin:
-        queryset = queryset.filter(fecha__lte=fecha_fin)
-
-    response = exportar_asistencias_csv(queryset)
-    return response
+    queryset = AsistenciasService.obtener_queryset_filtrado(
+        grupo_id=request.query_params.get('grupo_id'),
+        fecha_inicio=request.query_params.get('fecha_inicio'),
+        fecha_fin=request.query_params.get('fecha_fin'),
+    )
+    return generar_asistencias_csv(queryset)
 
 @swagger_auto_schema(
     method='GET',
@@ -709,21 +648,12 @@ def exportar_asistencias_csv(request):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def exportar_asistencias_excel(request):
-    grupo_id = request.query_params.get('grupo_id')
-    fecha_inicio = request.query_params.get('fecha_inicio')
-    fecha_fin = request.query_params.get('fecha_fin')
-
-    queryset = Asistencias.objects.select_related('alumno', 'grupo', 'grupo__grado', 'grupo__seccion')
-
-    if grupo_id:
-        queryset = queryset.filter(grupo_id=grupo_id)
-    if fecha_inicio:
-        queryset = queryset.filter(fecha__gte=fecha_inicio)
-    if fecha_fin:
-        queryset = queryset.filter(fecha__lte=fecha_fin)
-
-    response = exportar_asistencias_excel(queryset)
-    return response
+    queryset = AsistenciasService.obtener_queryset_filtrado(
+        grupo_id=request.query_params.get('grupo_id'),
+        fecha_inicio=request.query_params.get('fecha_inicio'),
+        fecha_fin=request.query_params.get('fecha_fin'),
+    )
+    return generar_asistencias_excel(queryset)
 
 @swagger_auto_schema(
     method='GET',
@@ -739,21 +669,14 @@ def exportar_asistencias_excel(request):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def exportar_asistencias_pdf(request):
-    grupo_id = request.query_params.get('grupo_id')
     fecha_inicio = request.query_params.get('fecha_inicio')
     fecha_fin = request.query_params.get('fecha_fin')
-
-    queryset = Asistencias.objects.select_related('alumno', 'grupo', 'grupo__grado', 'grupo__seccion')
-
-    if grupo_id:
-        queryset = queryset.filter(grupo_id=grupo_id)
-    if fecha_inicio:
-        queryset = queryset.filter(fecha__gte=fecha_inicio)
-    if fecha_fin:
-        queryset = queryset.filter(fecha__lte=fecha_fin)
-
-    response = exportar_asistencias_pdf(queryset, fecha_inicio, fecha_fin)
-    return response
+    queryset = AsistenciasService.obtener_queryset_filtrado(
+        grupo_id=request.query_params.get('grupo_id'),
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+    )
+    return generar_asistencias_pdf(queryset, fecha_inicio, fecha_fin)
 
 @swagger_auto_schema(
     method='GET',
@@ -1340,39 +1263,18 @@ class CargaCalificacionesDocenteExternaAPIView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        # 1) Token de acceso en los query params de la URL.
+        # 1) Gobernanza del acceso docente (servicio único): token ->
+        #    periodo vigente. Las excepciones de dominio se traducen aquí
+        #    a la respuesta HTTP correspondiente.
         token = request.query_params.get('token')
-        if not token:
-            return Response(
-                {'success': False, 'error': 'Token de acceso requerido.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # 2) Periodo de calificación correspondiente al token.
         try:
-            periodo = PeriodoCalificacion.objects.get(token_acceso=token)
-        except PeriodoCalificacion.DoesNotExist:
-            return Response(
-                {'success': False, 'error': 'Acceso denegado.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        except Exception:
-            logger.debug('Error buscando PeriodoCalificacion por token', exc_info=True)
-            return Response(
-                {'success': False, 'error': 'Acceso denegado.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            periodo = PeriodoAccesoService.resolver_y_validar_periodo(token)
+        except TokenInvalidoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_403_FORBIDDEN)
+        except PeriodoCerradoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3) Regla estricta: el lapso debe estar abierto (switch manual y
-        #    fecha límite de carga de notas).
-        if not periodo.esta_abierto():
-            return Response(
-                {'success': False,
-                 'error': 'El periodo de carga de notas ha concluido o está cerrado.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # 4) Validación sintáctica del lote.
+        # 2) Validación sintáctica del lote.
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -1380,7 +1282,7 @@ class CargaCalificacionesDocenteExternaAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 5) Persistencia atómica e idempotente de la sección completa.
+        # 3) Persistencia atómica e idempotente de la sección completa.
         try:
             resumen = serializer.guardar_lote(periodo_objeto=periodo)
         except ValidationError as exc:
@@ -1427,6 +1329,54 @@ class CargaCriteriosDocenteExternaAPIView(APIView):
 
     @swagger_auto_schema(
         tags=['Calificaciones'],
+        operation_summary='Obtener datos del grupo, criterios y alumnos para carga externa (docente externo)',
+        operation_description='Retorna el grupo académico vinculado al token, la lista de criterios de evaluación dinámicos de esa sección y los alumnos inscritos activos. Requiere token válido y periodo abierto. Acceso sin sesión JWT.',
+        manual_parameters=[
+            openapi.Parameter(
+                'token', openapi.IN_QUERY, type=openapi.TYPE_STRING,
+                description='Token seguro del periodo de calificación.',
+            ),
+        ],
+        responses={
+            200: openapi.Response('Datos del grupo, criterios y alumnos'),
+            400: openapi.Response('Periodo cerrado'),
+            403: openapi.Response('Token ausente o inválido'),
+            404: openapi.Response('No hay grupos con criterios para este lapso'),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        # 1) Gobernanza del acceso docente (servicio único): token ->
+        #    periodo vigente. Las excepciones de dominio se traducen aquí
+        #    a la respuesta HTTP correspondiente.
+        token = request.query_params.get('token')
+        try:
+            periodo = PeriodoAccesoService.resolver_y_validar_periodo(token)
+        except TokenInvalidoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_403_FORBIDDEN)
+        except PeriodoCerradoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2) Datos del lapso para la interfaz de carga (grupo, criterios y
+        #    alumnos): lectura encapsulada en el servicio, con consultas
+        #    consolidadas en 3 SQL (sin N+1). Las excepciones de dominio
+        #    se traducen aquí a la respuesta HTTP correspondiente.
+        try:
+            datos = CalificacionesService.obtener_datos_carga_criterios(periodo)
+        except GrupoSinCriteriosError as exc:
+            return Response(
+                {'success': False, 'error': exc.message},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except CalificacionesServiceError:
+            return Response(
+                {'success': False, 'error': 'Acceso denegado.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return Response(datos, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        tags=['Calificaciones'],
         operation_summary='Carga masiva de criterios cualitativos por sección (docente externo)',
         operation_description='Recibe el lote de evaluaciones de criterios '
                               'cualitativos de una sección para un lapso '
@@ -1447,39 +1397,18 @@ class CargaCriteriosDocenteExternaAPIView(APIView):
         },
     )
     def post(self, request, *args, **kwargs):
-        # 1) Token de acceso en los query params de la URL.
+        # 1) Gobernanza del acceso docente (servicio único): token ->
+        #    periodo vigente. Las excepciones de dominio se traducen aquí
+        #    a la respuesta HTTP correspondiente.
         token = request.query_params.get('token')
-        if not token:
-            return Response(
-                {'success': False, 'error': 'Token de acceso requerido.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # 2) Periodo de calificación correspondiente al token.
         try:
-            periodo = PeriodoCalificacion.objects.get(token_acceso=token)
-        except PeriodoCalificacion.DoesNotExist:
-            return Response(
-                {'success': False, 'error': 'Acceso denegado.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        except Exception:
-            logger.debug('Error buscando PeriodoCalificacion por token (criterios)', exc_info=True)
-            return Response(
-                {'success': False, 'error': 'Acceso denegado.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+            periodo = PeriodoAccesoService.resolver_y_validar_periodo(token)
+        except TokenInvalidoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_403_FORBIDDEN)
+        except PeriodoCerradoError as exc:
+            return Response({'detail': exc.message}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 3) Regla estricta: el lapso debe estar abierto (switch manual y
-        #    fecha límite de carga de notas).
-        if not periodo.esta_abierto():
-            return Response(
-                {'success': False,
-                 'error': 'El periodo de carga de notas ha concluido o está cerrado.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # 4) Validación sintáctica del lote de criterios.
+        # 2) Validación sintáctica del lote de criterios.
         serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -1487,7 +1416,7 @@ class CargaCriteriosDocenteExternaAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 5) Persistencia atómica e idempotente del lote de criterios.
+        # 3) Persistencia atómica e idempotente del lote de criterios.
         try:
             resumen = serializer.guardar_lote_criterios(periodo_objeto=periodo)
         except ValidationError as exc:
@@ -1576,66 +1505,19 @@ class DescargaInformeDescriptivoAPIView(APIView):
             )
 
         try:
-            alumno = Alumnos.objects.get(pk=id_alumno)
-        except Alumnos.DoesNotExist:
-            logger.debug('Alumno no encontrado: id=%s', id_alumno, exc_info=True)
+            pdf_buffer, filename = ReportesService.generar_informe_descriptivo(
+                id_alumno, id_periodo,
+            )
+        except (AlumnoNoEncontradoError, PeriodoNoEncontradoError) as exc:
             return Response(
-                {'success': False, 'error': 'Alumno no encontrado.'},
+                {'success': False, 'error': exc.message},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        except Exception:
-            logger.debug('Error buscando alumno id=%s', id_alumno, exc_info=True)
+        except ReporteError as exc:
             return Response(
-                {'success': False, 'error': 'Error al buscar el alumno.'},
+                {'success': False, 'error': exc.message},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        try:
-            periodo = PeriodoCalificacion.objects.get(pk=id_periodo)
-        except PeriodoCalificacion.DoesNotExist:
-            logger.debug('Periodo no encontrado: id=%s', id_periodo, exc_info=True)
-            return Response(
-                {'success': False, 'error': 'Periodo de calificación no encontrado.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except Exception:
-            logger.debug('Error buscando periodo id=%s', id_periodo, exc_info=True)
-            return Response(
-                {'success': False, 'error': 'Error al buscar el periodo.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        # Obtener el grupo del alumno a través de sus evaluaciones en el lapso.
-        grupo = None
-        try:
-            ev = EvaluacionLapsoCriterio.objects.filter(
-                alumno=alumno, periodo=periodo
-            ).select_related('criterio__grupo').first()
-            if ev:
-                grupo = ev.criterio.grupo
-        except Exception:
-            logger.debug(
-                'Error obteniendo grupo del alumno %s en periodo %s',
-                id_alumno, id_periodo, exc_info=True,
-            )
-
-        try:
-            pdf_buffer = generar_pdf_informe_descriptivo(alumno, periodo, grupo)
-        except Exception:
-            logger.debug(
-                'Error generando PDF informe descriptivo alumno=%s periodo=%s',
-                id_alumno, id_periodo, exc_info=True,
-            )
-            return Response(
-                {'success': False, 'error': 'No se pudo generar el informe PDF.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        cedula = (
-            alumno.cedula_escolar or alumno.numero_documento_identidad or id_alumno
-        )
-        lapso = periodo.numero_periodo
-        filename = f"Informe_Descriptivo_{cedula}_Lapso{lapso}.pdf"
 
         response = FileResponse(
             pdf_buffer,
@@ -1697,85 +1579,19 @@ class DescargaConstanciaProsecucionAPIView(APIView):
 
     def get(self, request, alumno_id, *args, **kwargs):
         try:
-            alumno = Alumnos.objects.get(pk=alumno_id)
-        except Alumnos.DoesNotExist:
-            logger.debug('Alumno no encontrado para constancia: id=%s', alumno_id, exc_info=True)
+            pdf_buffer, filename = ReportesService.generar_constancia_prosecucion(
+                alumno_id,
+            )
+        except (AlumnoNoEncontradoError, ConstanciaNoEncontradaError) as exc:
             return Response(
-                {'success': False, 'error': 'Alumno no encontrado.'},
+                {'success': False, 'error': exc.message},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        except Exception:
-            logger.debug('Error buscando alumno para constancia: id=%s', alumno_id, exc_info=True)
+        except ReporteError as exc:
             return Response(
-                {'success': False, 'error': 'Error al buscar el alumno.'},
+                {'success': False, 'error': exc.message},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        # Año escolar actual desde el periodo académico activo
-        # (ej: "Año Escolar 2026-2027" -> "2026-2027", formato que espera
-        # el campo periodo_escolar de la constancia).
-        anio_escolar = None
-        try:
-            periodo_activo = PeriodosAcademicos.objects.filter(
-                activo=True
-            ).order_by('-fecha_inicio').first()
-            if periodo_activo:
-                coincidencia = re.search(
-                    r'(\d{4}-\d{4})',
-                    f'{periodo_activo.nombre_periodo} {periodo_activo.codigo_periodo}',
-                )
-                if coincidencia:
-                    anio_escolar = coincidencia.group(1)
-        except Exception:
-            logger.debug('Error resolviendo el año escolar activo', exc_info=True)
-
-        try:
-            queryset = ConstanciaProsecucionFinal.objects.filter(alumno=alumno)
-            if anio_escolar:
-                constancia = queryset.filter(periodo_escolar=anio_escolar).first()
-            else:
-                # Sin periodo activo determinable: última constancia emitida.
-                constancia = queryset.order_by('-fecha_expedicion', '-id').first()
-        except Exception:
-            logger.debug(
-                'Error buscando constancia del alumno id=%s (año escolar %s)',
-                alumno_id, anio_escolar, exc_info=True,
-            )
-            return Response(
-                {'success': False, 'error': 'Error al buscar la constancia.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        if constancia is None:
-            logger.debug(
-                'Constancia no encontrada: alumno id=%s año escolar=%s',
-                alumno_id, anio_escolar, exc_info=True,
-            )
-            return Response(
-                {
-                    'success': False,
-                    'error': 'No existe constancia de prosecución final para '
-                             'este alumno en el año escolar actual.',
-                },
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        try:
-            pdf_buffer = generar_pdf_constancia_prosecucion(alumno, constancia)
-        except Exception:
-            logger.debug(
-                'Error generando PDF de constancia alumno=%s constancia=%s',
-                alumno_id, getattr(constancia, 'pk', None), exc_info=True,
-            )
-            return Response(
-                {'success': False, 'error': 'No se pudo generar la constancia PDF.'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
-        cedula = (
-            alumno.cedula_escolar or alumno.numero_documento_identidad or alumno_id
-        )
-        filename = f"Constancia_Prosecucion_{cedula}.pdf"
 
         response = FileResponse(
             pdf_buffer,

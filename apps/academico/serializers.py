@@ -20,6 +20,7 @@ from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSeria
 from apps.core.models import Direcciones
 from apps.personal.serializers import ProfesoresSerializer
 from apps.personal.models import RepresentantesLegales, AlumnoRepresentante, Profesores
+from apps.academico.services import CalificacionesService
 
 
 logger = logging.getLogger(__name__)
@@ -824,9 +825,14 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
     sección. Recibe el lote completo de alumnos y sus evaluaciones para un
     grupo académico y un periodo de calificación dado.
 
+    Responsabilidad (SRP): validación sintáctica del payload y delegación
+    de la lógica de negocio, transacciones atómicas y reglas pedagógicas a
+    ``CalificacionesService`` (capa de servicios pura).
+
     JSON de ejemplo:
     {
       "id_grupo_academico": 5,
+      "nivel_educativo": "PRIMARIA",
       "alumnos_evaluaciones": [
         {
           "id_alumno": 31,
@@ -841,6 +847,14 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
     id_grupo_academico = serializers.IntegerField(
         help_text='La sección/grupo a registrar.'
     )
+    nivel_educativo = serializers.ChoiceField(
+        choices=['INICIAL', 'PRIMARIA'],
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text='Nivel educativo: INICIAL (Preescolar) o PRIMARIA (1ro a 6to Grado). '
+                  'Si se omite, se infiere del grupo académico.',
+    )
     alumnos_evaluaciones = AlumnoCriteriosPayloadSerializer(
         many=True,
         help_text='El lote completo de la sección.',
@@ -848,75 +862,71 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
 
     def guardar_lote_criterios(self, periodo_objeto):
         """
-        Persiste el lote de evaluaciones cualitativas de forma atómica e
-        idempotente para el periodo dado.
+        Construye el lote plano esperado por el servicio y delega el
+        procesamiento atómico a ``CalificacionesService.procesar_carga_masiva_criterios``.
 
-        Reglas de negocio estrictas:
-        1. Atomicidad: todo el procesamiento se envuelve en
-           transaction.atomic(). Si un solo indicador es inválido o un
-           id_alumno no pertenece al grupo, se ejecuta rollback absoluto.
-        2. Idempotencia: update_or_create sobre EvaluacionLapsoCriterio
-           mapeando las llaves (alumno_id, criterio_id, periodo). Si el
-           docente corrige y reenvía, se actualizan en lugar de duplicar.
+        El serializador ya no contiene:
+          - bloque ``transaction.atomic()``,
+          - bucles de acceso a base de datos (N+1 eliminado en el servicio),
+          - validaciones pedagógicas de literales/caracteres (residen en el
+            Patrón Estrategia del servicio).
 
-        Retorna un resumen:
-        {'id_grupo_academico', 'id_periodo', 'creadas', 'actualizadas', 'total'}
+        Retorna un resumen compatible con el controlador HTTP:
+          {'id_grupo_academico', 'id_periodo', 'creadas', 'actualizadas', 'total'}
         """
         id_grupo_academico = self.validated_data['id_grupo_academico']
+        nivel_educativo = self.validated_data.get('nivel_educativo')
         items = self.validated_data['alumnos_evaluaciones']
+        periodo_id = periodo_objeto.pk
 
-        creadas = 0
-        actualizadas = 0
+        # Si el cliente no envió el nivel educativo, se infiere del grupo académico.
+        if not nivel_educativo:
+            try:
+                grupo = GruposAcademicos.objects.select_related('nivel').get(
+                    id_grupo=id_grupo_academico
+                )
+                nombre_nivel = (grupo.nivel.nombre_nivel or '').strip().lower()
+                nivel_map = {
+                    'educación inicial': 'INICIAL',
+                    'educacion inicial': 'INICIAL',
+                    'inicial': 'INICIAL',
+                    'educación primaria': 'PRIMARIA',
+                    'educacion primaria': 'PRIMARIA',
+                    'primaria': 'PRIMARIA',
+                }
+                nivel_educativo = nivel_map.get(nombre_nivel, 'PRIMARIA')
+            except GruposAcademicos.DoesNotExist:
+                nivel_educativo = 'PRIMARIA'
+
+        # Mapeo del payload anidado a lista plana para el servicio.
+        # Cada entrada: alumno_id, criterio_id, literal (indicador),
+        # informe_descriptivo (sugerencias).
+        lote_datos = []
+        for alumno_payload in items:
+            id_alumno = alumno_payload['id_alumno']
+            for eval_item in alumno_payload['evaluaciones']:
+                lote_datos.append({
+                    'alumno_id': id_alumno,
+                    'criterio_id': eval_item['id_criterio'],
+                    'literal': eval_item.get('indicador'),
+                    'informe_descriptivo': eval_item.get('sugerencias') or '',
+                })
 
         try:
-            with transaction.atomic():
-                for alumno_payload in items:
-                    id_alumno = alumno_payload['id_alumno']
-                    evaluaciones = alumno_payload['evaluaciones']
-
-                    for eval_item in evaluaciones:
-                        id_criterio = eval_item['id_criterio']
-                        indicador = eval_item['indicador']
-                        sugerencias = (
-                            eval_item.get('sugerencias') or ''
-                        ).strip() or None
-
-                        _, creado = EvaluacionLapsoCriterio.objects.update_or_create(
-                            alumno_id=id_alumno,
-                            criterio_id=id_criterio,
-                            periodo=periodo_objeto,
-                            defaults={
-                                'indicador': indicador,
-                                'sugerencias': sugerencias,
-                            },
-                        )
-                        if creado:
-                            creadas += 1
-                        else:
-                            actualizadas += 1
-        except ValidationError:
-            logger.debug(
-                'Rollback del lote de criterios del grupo %s (lapso %s)',
-                id_grupo_academico,
-                getattr(periodo_objeto, 'pk', None),
-                exc_info=True,
+            resultado = CalificacionesService.procesar_carga_masiva_criterios(
+                periodo_id=periodo_id,
+                nivel_educativo=nivel_educativo,
+                lote_datos=lote_datos,
             )
-            raise
-        except IntegrityError:
-            logger.debug(
-                'Error de integridad en el lote de criterios del grupo %s '
-                '(lapso %s)',
-                id_grupo_academico,
-                getattr(periodo_objeto, 'pk', None),
-                exc_info=True,
-            )
-            raise
+        except Exception as e:
+            mensaje = getattr(e, 'message', str(e))
+            raise serializers.ValidationError({"detail": mensaje})
 
         return {
             'id_grupo_academico': id_grupo_academico,
-            'id_periodo': periodo_objeto.pk,
-            'creadas': creadas,
-            'actualizadas': actualizadas,
+            'id_periodo': resultado['periodo_id'],
+            'creadas': resultado['creadas'],
+            'actualizadas': resultado['actualizadas'],
             'total': len(items),
         }
 

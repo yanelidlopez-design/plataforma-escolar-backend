@@ -29,6 +29,7 @@ from apps.academico.models import (
     CriterioEvaluacion,
     EvaluacionLapsoCriterio,
     GruposAcademicos,
+    Inscripciones,
     PeriodoCalificacion,
 )
 from apps.core.models import (
@@ -37,6 +38,10 @@ from apps.core.models import (
     PeriodosAcademicos,
     Secciones,
     Turnos,
+)
+from apps.academico.services.periodo_acceso_service import (
+    PeriodoCerradoError,
+    TokenInvalidoError,
 )
 
 # Modelos legacy de core requeridos para construir GruposAcademicos en la BD
@@ -48,6 +53,7 @@ MODELOS_CORE_GRUPOS = [
     Turnos,
     GradosAcademicos,
     GruposAcademicos,
+    Inscripciones,
 ]
 
 
@@ -362,7 +368,7 @@ def test_bloqueo_por_switch_o_calendario_vencido(api_client, periodo_apagado, pe
         format='json',
     )
     assert response_switch.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
-    assert 'concluido o está cerrado' in response_switch.data['error']  # nosec B101
+    assert response_switch.data['detail'] == PeriodoCerradoError.default_message  # nosec B101
 
     # Variante B: calendario vencido (fecha_limite en el pasado).
     response_vencido = api_client.post(
@@ -371,7 +377,7 @@ def test_bloqueo_por_switch_o_calendario_vencido(api_client, periodo_apagado, pe
         format='json',
     )
     assert response_vencido.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
-    assert 'concluido o está cerrado' in response_vencido.data['error']  # nosec B101
+    assert response_vencido.data['detail'] == PeriodoCerradoError.mensaje_fecha_vencida  # nosec B101
 
     # En ningún caso se persistieron evaluaciones.
     assert EvaluacionLapsoCriterio.objects.count() == 0  # nosec B101
@@ -400,17 +406,131 @@ def test_denegacion_token_ausente_o_invalido(api_client, periodo_abierto, tablas
     url_sin_token = reverse('carga_criterios_externa')
     response_sin_token = api_client.post(url_sin_token, payload, format='json')
     assert response_sin_token.status_code == status.HTTP_403_FORBIDDEN  # nosec B101
-    assert response_sin_token.data['success'] is False  # nosec B101
 
     # Caso B: token alfanumérico inventado (no existe en MariaDB).
     url_token_invalido = f"{url_sin_token}?token=token-falso-inventado-12345"
     response_token_invalido = api_client.post(url_token_invalido, payload, format='json')
     assert response_token_invalido.status_code == status.HTTP_403_FORBIDDEN  # nosec B101
-    assert response_token_invalido.data['success'] is False  # nosec B101
 
-    # Mensaje genérico (no revela si el token existe o no).
-    assert 'Acceso denegado' in response_token_invalido.data['error']  # nosec B101
-    assert 'Token de acceso requerido' in response_sin_token.data['error']  # nosec B101
+    # Mensaje genérico del servicio de gobernanza (no revela si el token existe).
+    assert response_sin_token.data['detail'] == TokenInvalidoError.default_message  # nosec B101
+    assert response_token_invalido.data['detail'] == TokenInvalidoError.default_message  # nosec B101
 
     # Ninguna evaluación se persistió por intentos fallidos de autenticación.
     assert EvaluacionLapsoCriterio.objects.count() == 0  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Lectura Pública Exitosa - GET 200 OK
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_lectura_publica_criterios_exitoso_200(api_client, periodo_abierto, tablas_legacy, tablas_grupos):
+    """GET con token válido y periodo abierto → 200 OK con grupo, criterios y alumnos."""
+    grupo = _crear_grupo('Educación Primaria', 'Primer Grado')
+    alumno = _crear_alumno('Lucía', 'V-11111111')
+    criterio_1 = _crear_criterio(grupo, 'Matemática', 'Resuelve problemas de suma y resta.')
+    criterio_2 = _crear_criterio(grupo, 'Lengua', 'Lee con fluidez y comprensión.')
+
+    # Inscripción activa del alumno en el grupo.
+    Inscripciones.objects.create(
+        alumno=alumno,
+        grupo=grupo,
+        fecha_inscripcion=timezone.now(),
+        estado_inscripcion='Activa',
+        monto_pago=None,
+        referencia_bancaria=None,
+    )
+
+    # Vincular criterio con el lapso para que el grupo sea descubierto por el GET.
+    EvaluacionLapsoCriterio.objects.create(
+        alumno=alumno,
+        criterio=criterio_1,
+        periodo=periodo_abierto,
+        indicador='PL',
+    )
+
+    response = api_client.get(_url_carga(periodo_abierto), format='json')
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert response.data['success'] is True  # nosec B101
+    assert response.data['numero_periodo'] == periodo_abierto.numero_periodo  # nosec B101
+
+    # Llaves exactas del payload de respuesta.
+    assert set(response.data.keys()) == {'success', 'numero_periodo', 'grupo', 'criterios', 'alumnos'}  # nosec B101
+
+    # Estructura del grupo.
+    assert response.data['grupo']['id'] == grupo.id_grupo  # nosec B101
+    assert response.data['grupo']['grado'] == grupo.grado.nombre_grado  # nosec B101
+    assert response.data['grupo']['seccion'] == grupo.seccion.nombre_seccion  # nosec B101
+
+    # Criterios del grupo.
+    assert len(response.data['criterios']) == 2  # nosec B101
+    criterio_ids = {c['id'] for c in response.data['criterios']}
+    assert criterio_1.pk in criterio_ids  # nosec B101
+    assert criterio_2.pk in criterio_ids  # nosec B101
+    for c in response.data['criterios']:
+        assert set(c.keys()) == {'id', 'materia_nombre', 'descripcion_criterio'}  # nosec B101
+
+    # Alumnos inscritos activos.
+    assert len(response.data['alumnos']) == 1  # nosec B101
+    assert response.data['alumnos'][0]['id'] == alumno.id_alumno  # nosec B101
+    assert response.data['alumnos'][0]['primer_nombre'] == alumno.primer_nombre  # nosec B101
+    assert response.data['alumnos'][0]['primer_apellido'] == alumno.primer_apellido  # nosec B101
+    assert response.data['alumnos'][0]['cedula'] == alumno.cedula_escolar  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Bloqueo por Interruptor Administrativo - GET 400 Bad Request
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_bloqueo_por_interruptor_administrativo_get_400(api_client, periodo_apagado, periodo_vencido, tablas_legacy, tablas_grupos):
+    """GET con periodo switch-apagado o fecha límite vencida → 400 Bad Request."""
+    grupo = _crear_grupo('Educación Primaria', 'Cuarto Grado')
+    alumno = _crear_alumno('Carla', 'V-88888888')
+    criterio_1 = _crear_criterio(grupo, 'Matemática', 'Resuelve problemas de suma y resta.')
+
+    EvaluacionLapsoCriterio.objects.create(
+        alumno=alumno,
+        criterio=criterio_1,
+        periodo=periodo_apagado,
+        indicador='PL',
+    )
+
+    # Variante A: switch de la interfaz administrativa apagado.
+    response_switch = api_client.get(_url_carga(periodo_apagado), format='json')
+    assert response_switch.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
+    assert response_switch.data['detail'] == PeriodoCerradoError.default_message  # nosec B101
+
+    # Variante B: calendario vencido (fecha_limite en el pasado).
+    EvaluacionLapsoCriterio.objects.create(
+        alumno=alumno,
+        criterio=criterio_1,
+        periodo=periodo_vencido,
+        indicador='PL',
+    )
+    response_vencido = api_client.get(_url_carga(periodo_vencido), format='json')
+    assert response_vencido.status_code == status.HTTP_400_BAD_REQUEST  # nosec B101
+    assert response_vencido.data['detail'] == PeriodoCerradoError.mensaje_fecha_vencida  # nosec B101
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Denegación por Token Ausente o Inválido - GET 403 Forbidden
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_denegacion_token_ausente_o_invalido_get_403(api_client, periodo_abierto, tablas_legacy, tablas_grupos):
+    """GET sin token o con token inventado → 403 Forbidden genérico."""
+    url_base = reverse('carga_criterios_externa')
+
+    # Caso A: sin parámetro de token en la URL.
+    response_sin_token = api_client.get(url_base, format='json')
+    assert response_sin_token.status_code == status.HTTP_403_FORBIDDEN  # nosec B101
+    assert response_sin_token.data['detail'] == TokenInvalidoError.default_message  # nosec B101
+
+    # Caso B: token alfanumérico inventado (no existe en MariaDB).
+    url_token_invalido = f'{url_base}?token=token-falso-inventado-12345'
+    response_token_invalido = api_client.get(url_token_invalido, format='json')
+    assert response_token_invalido.status_code == status.HTTP_403_FORBIDDEN  # nosec B101
+    assert response_token_invalido.data['detail'] == TokenInvalidoError.default_message  # nosec B101
