@@ -239,9 +239,9 @@ django-picklefield==3.4.0 \
     # via
     #   -r requirements.in
     #   django-q2
-django-q2==1.8.0 \
-    --hash=sha256:78aaaf18dff1ad3e35bcf6556666f2c26494120f0b75961c13206e37d180dfaa \
-    --hash=sha256:e86b9625c0ce57a5ae31ca8fd7e798d63b9ef91a227c52f8b47536ba50b2b284
+django-q2==1.11.1 \
+    --hash=sha256:640caf961f9098f26e00a22b743c4eb63da681a5390829b1ed951db677866e67 \
+    --hash=sha256:b7e7cc030811babc1824de6c5888faec9e84ecd21572401bfdf48770ea67805f
     # via -r requirements.in
 djangorestframework==3.17.2 \
     --hash=sha256:89ed713b6dc83e1539f214b7d10808ae19bb8511004beba886225da6d5c9dafa \
