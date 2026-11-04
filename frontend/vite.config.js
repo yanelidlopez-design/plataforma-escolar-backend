@@ -7,9 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Dentro de Docker, localhost apuntaría al propio contenedor de Vite.
       '/api': {
-        target: 'http://backend:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
       },
     },

@@ -3,7 +3,11 @@
 .env
 .env.*
 backups/
-frontend/
+frontend/node_modules/
+frontend/dist/
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
 __pycache__/
 *.pyc
 *.pyo

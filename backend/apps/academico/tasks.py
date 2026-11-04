@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from django.conf import settings
 from django_q.tasks import async_task
 
+from .models import Reporte
+
 logger = logging.getLogger(__name__)
 
 # Carpeta de almacenamiento temporal de exportaciones
@@ -69,6 +71,13 @@ def encolar_exportacion(modulo, formato, queryset):
     import uuid
 
     reporte_id = uuid.uuid4().hex
+    Reporte.objects.create(
+        id=reporte_id,
+        modulo=modulo,
+        formato=formato,
+        estado='Procesando',
+        parametros={'modulo': modulo, 'formato': formato},
+    )
     _escribir_estado(reporte_id, {
         'reporte_id': reporte_id,
         'estatus': 'Procesando',
@@ -112,19 +121,35 @@ def ejecutar_exportacion(reporte_id, modulo, formato, queryset):
         with open(ruta, 'wb') as fh:
             fh.write(response.content)
 
+        completado_en = datetime.now(timezone.utc)
+        Reporte.objects.filter(pk=reporte_id).update(
+            estado='Completado',
+            archivo=f'exports/{reporte_id}/{nombre_archivo}',
+            error='',
+            tamanio_bytes=len(response.content),
+            fecha_completado=completado_en,
+            fecha_actualizacion=completado_en,
+        )
         _escribir_estado(reporte_id, {
             **estado,
             'estatus': 'Completado',
             'archivo': nombre_archivo,
             'tamanio_bytes': len(response.content),
-            'completado_en': datetime.now(timezone.utc).isoformat(),
+            'completado_en': completado_en.isoformat(),
         })
         logger.info('Reporte %s completado (%s bytes)', reporte_id, len(response.content))
     except Exception as exc:  # noqa: BLE001 -- el estado debe registrar cualquier fallo
         logger.exception('Error generando reporte %s', reporte_id)
+        completado_en = datetime.now(timezone.utc)
+        Reporte.objects.filter(pk=reporte_id).update(
+            estado='Error',
+            error=str(exc),
+            fecha_completado=completado_en,
+            fecha_actualizacion=completado_en,
+        )
         _escribir_estado(reporte_id, {
             **estado,
             'estatus': 'Error',
             'detalle': str(exc),
-            'completado_en': datetime.now(timezone.utc).isoformat(),
+            'completado_en': completado_en.isoformat(),
         })

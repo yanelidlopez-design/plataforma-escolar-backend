@@ -1,86 +1,35 @@
 services:
-  # -----------------------------------------------------------
-  # Base de datos MariaDB (MySQL compatible)
-  # -----------------------------------------------------------
-  db:
-    image: mariadb:10.11
-    container_name: plataforma_escolar_db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password_dev
-      MYSQL_DATABASE: ${DB_NAME:-plataforma_escolar}
-      MYSQL_USER: ${DB_USER:-admin_plataforma}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-2296}
+  web:
+    build: .
     ports:
-      - "3307:3306"
-    volumes:
-      - plataforma_db_data:/var/lib/mysql
-      - ./docker-entrypoint-initdb.sql:/docker-entrypoint-initdb.d/01-init-legacy-tables.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    networks:
-      - plataforma_network
-
-  # -----------------------------------------------------------
-  # Backend Django
-  # -----------------------------------------------------------
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: plataforma_escolar_backend
-    restart: unless-stopped
+      - "8000:8000"
     env_file:
       - .env
     environment:
-      - DB_HOST=db
-      - DB_PORT=3306
-    ports:
-      - "8001:8000"
-    volumes:
-      - .:/app
-      - static_volume:/app/static
-      - media_volume:/app/media
+      DB_HOST: db
+      DB_PORT: "3306"
     depends_on:
       db:
         condition: service_healthy
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             python manage.py runserver 0.0.0.0:8000"
-    networks:
-      - plataforma_network
-
-  # -----------------------------------------------------------
-  # Frontend (Vite + React) - solo para desarrollo
-  # -----------------------------------------------------------
-  frontend:
-    image: node:18-alpine
-    container_name: plataforma_escolar_frontend
     restart: unless-stopped
-    working_dir: /app/frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app/frontend
-      - frontend_node_modules:/app/frontend/node_modules
-    command: sh -c "npm install && npm run dev -- --host"
-    networks:
-      - plataforma_network
 
-# -----------------------------------------------------------
-# Redes y volúmenes
-# -----------------------------------------------------------
-networks:
-  plataforma_network:
-    driver: bridge
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-${DB_NAME:-plataforma}}
+      MARIADB_USER: ${MARIADB_USER:-${DB_USER:-user}}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-${DB_PASSWORD:-pass}}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-me-root}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./docker-entrypoint-initdb.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
 volumes:
-  plataforma_db_data:
-  static_volume:
-  media_volume:
-  frontend_node_modules:
+  mariadb_data:

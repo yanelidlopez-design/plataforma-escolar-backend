@@ -9,17 +9,23 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential default-libmysqlclient-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --require-hashes -r requirements.txt
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r backend/requirements.txt
 
-COPY . ./
+COPY backend/ ./backend/
+COPY docker-entrypoint-initdb.sql ./docker-entrypoint-initdb.sql
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /app/static /app/media \
     && groupadd --system django \
     && useradd --system --gid django --home-dir /app django \
-    && chown -R django:django /app
+    && chown -R django:django /app \
+    && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+WORKDIR /app/backend
 
 USER django
 
 EXPOSE 8000
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120"]

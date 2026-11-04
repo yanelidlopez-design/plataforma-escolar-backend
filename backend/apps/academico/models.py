@@ -184,6 +184,55 @@ class Asistencias(models.Model):
         return f"{self.alumno.primer_nombre} {self.alumno.primer_apellido} - {self.fecha} - {self.get_estado_display()}"
 
 
+class Reporte(models.Model):
+    ESTADO_CHOICES = [
+        ('Procesando', 'Procesando'),
+        ('Completado', 'Completado'),
+        ('Error', 'Error'),
+    ]
+
+    id = models.CharField(max_length=32, primary_key=True)
+    modulo = models.CharField(max_length=50)
+    formato = models.CharField(max_length=20)
+    estado = models.CharField(
+        max_length=20,
+        choices=ESTADO_CHOICES,
+        default='Procesando',
+    )
+    archivo = models.FileField(upload_to='exports/', blank=True)
+    error = models.TextField(blank=True, default='')
+    parametros = models.JSONField(default=dict, blank=True)
+    tamanio_bytes = models.PositiveBigIntegerField(blank=True, null=True)
+    alumno = models.ForeignKey(
+        Alumnos,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_constraint=False,
+        related_name='reportes',
+    )
+    generado_por = models.ForeignKey(
+        'personal.Profesores',
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_constraint=False,
+        related_name='reportes_generados',
+    )
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+    fecha_actualizacion = models.DateTimeField(auto_now=True)
+    fecha_completado = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'reportes'
+        ordering = ['-fecha_creacion']
+        verbose_name = 'Reporte'
+        verbose_name_plural = 'Reportes'
+
+    def __str__(self):
+        return f'{self.modulo}/{self.formato} - {self.estado}'
+
+
 class PeriodoInscripcion(models.Model):
     """
     Control dinámico del periodo de inscripciones externas.
