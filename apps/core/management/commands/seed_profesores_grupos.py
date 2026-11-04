@@ -1,13 +1,13 @@
 """
 Comando de gestión idempotente para sembrar PROFESORES de prueba con
-categoría válida ('Profesor') y asignarlos como docentes guía de los
+cargo válido ('Profesor') y asignarlos como docentes guía de los
 grupos de Preescolar (Inicial 1/2/3).
 
 Motivación:
-    La tabla legacy `profesores` guarda la categoría en la columna
+    La tabla legacy `profesores` guarda el cargo en la columna
     `especialidad`. Si un registro trae un valor fuera de
-    CATEGORIA_CHOICES (p.ej. 'Integral'), el endpoint
-    GET /api/personal/personal/?categoria=Profesor NO lo devuelve y el
+    CARGO_CHOICES (p.ej. 'Integral'), el endpoint
+    GET /api/personal/personal/?cargo=Profesor NO lo devuelve y el
     selector "Profesor Encargado" del frontend queda vacío. Además, los
     grupos de Preescolar pueden tener id_profesor_principal = NULL.
 
@@ -77,7 +77,7 @@ class Command(BaseCommand):
             usuario.save()
             self.stdout.write(f"  Usuario existente: {nombre_usuario} (id={usuario.id_usuario})")
 
-        # 2) Profesor. Idempotente por cédula. categoria se persiste en 'especialidad'.
+        # 2) Profesor. Idempotente por cédula. cargo se persiste en 'especialidad'.
         profesor, prof_creado = Profesores.objects.get_or_create(
             cedula=cedula,
             defaults={
@@ -86,7 +86,7 @@ class Command(BaseCommand):
                 "segundo_nombre": s_nombre,
                 "primer_apellido": p_apellido,
                 "segundo_apellido": s_apellido,
-                "categoria": "Profesor",
+                "cargo": "Profesor",
             },
         )
         if prof_creado:
@@ -94,9 +94,9 @@ class Command(BaseCommand):
                 f"  Profesor creado: {p_nombre} {p_apellido} (id={profesor.id_profesor})"
             ))
         else:
-            # Corrige categoría inválida heredada (p.ej. 'Integral') y re-vincula usuario.
+            # Corrige cargo inválido heredado (p.ej. 'Integral') y re-vincula usuario.
             profesor.id_usuario = usuario
-            profesor.categoria = "Profesor"
+            profesor.cargo = "Profesor"
             profesor.primer_nombre = p_nombre
             profesor.segundo_nombre = s_nombre
             profesor.primer_apellido = p_apellido

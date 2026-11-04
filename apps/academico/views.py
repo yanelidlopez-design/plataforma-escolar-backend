@@ -13,7 +13,12 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError, Prefetch
 import logging
-from .models import Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias, PeriodoInscripcion, PeriodoCalificacion
+from datetime import date
+from .models import (
+    Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias,
+    PeriodoInscripcion, PeriodoCalificacion, CriterioEvaluacion,
+    CriterioPeriodo, EvaluacionLapsoCriterio, AprendizajeAlcanzado,
+)
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
     InscripcionesSerializer, CalificacionesSerializer, AsistenciasSerializer,
@@ -26,6 +31,7 @@ from .serializers import (
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
+from apps.core.authentication import URLTokenAuthentication
 from .reports import (
     exportar_alumnos_excel, exportar_alumnos_pdf, exportar_alumnos_csv,
     exportar_inscripciones_excel, exportar_inscripciones_pdf, exportar_inscripciones_csv,
@@ -36,9 +42,14 @@ from .reports import (
     INSCRIPCIONES_EXPORT_ENCABEZADOS, INSCRIPCIONES_PDF_COLUMNAS,
     _crear_estilos_comprobante, _separar_documento, _texto_seguro, _tabla_clave_valor,
 )
+from .reports_boleta import (
+    generar_excel_boleta_cualitativa,
+    generar_pdf_boleta_cualitativa,
+)
 from .services.inscripcion_service import generar_comprobante_inscripcion
 from .services.webhook_service import procesar_alumno_webhook, procesar_inscripcion_webhook
 from .services.asistencias_service import AsistenciasService
+from .reports_estadistica import generar_estadistica_mensual_pdf
 from .services.calificaciones_service import (
     CalificacionesService,
     CalificacionesServiceError,
@@ -75,6 +86,21 @@ def _respuesta_reporte_encolado(modulo, formato, queryset):
     }
 
 
+class EstadisticasDashboardAPIView(APIView):
+    permission_classes = [EsAdministrador]
+
+    def get(self, request):
+        hoy = timezone.localdate()
+        return Response({
+            'alumnos_registrados': Alumnos.objects.count(),
+            'personal_registrado': Profesores.objects.count(),
+            'asistencias_hoy': Asistencias.objects.filter(fecha=hoy).count(),
+            'inscripciones_activas': Inscripciones.objects.filter(
+                estado_inscripcion='Activa',
+            ).count(),
+        })
+
+
 @swagger_auto_schema(tags=['Alumnos'])
 class AlumnosViewSet(viewsets.ModelViewSet):
     queryset = Alumnos.objects.all()
@@ -85,10 +111,7 @@ class AlumnosViewSet(viewsets.ModelViewSet):
     ordering_fields = ['primer_apellido', 'primer_nombre']
     filter_fields = ['grado', 'seccion', 'estado_inscripcion']
 
-    # Encabezados únicos de las exportaciones (Excel/PDF/CSV) para que las 3
-    # vistas compartan exactamente las mismas columnas.
-    # Orden: identificación -> académico -> datos personales -> patria -> cuenta ->
-    #        dirección -> representante (tipo/doc/teléfono) -> profesor.
+    # Encabezados únicos de las exportaciones (Excel/PDF/CSV).
     ALUMNOS_EXPORT_ENCABEZADOS = ALUMNOS_EXPORT_ENCABEZADOS
 
     # Subconjunto de columnas que se muestran en el PDF (datos principales).
@@ -99,17 +122,17 @@ class AlumnosViewSet(viewsets.ModelViewSet):
         """Listado base de alumnos con filtros opcionales por grado y sección."""
         qs = super().get_queryset()
 
-        # Filtros manuales (django-filter no está instalado en el proyecto)
+        # Filtros manuales (django-filter no instalado)
         grado_id = self.request.query_params.get('grado')
         seccion_id = self.request.query_params.get('seccion')
         estado = self.request.query_params.get('estado')
 
         if grado_id or seccion_id or estado:
-            # Construcción del filtrado a través de Inscripciones y GruposAcademicos
+        # Usar Inscripciones y GruposAcademicos para filtrar
             try:
                 inscripciones = Inscripciones.objects.all()
                 if grado_id:
-                    # Acepta ID numérico (backend real) o nombre de grado (fallback offline del frontend)
+                    # Acepta ID numérico o nombre de grado
                     if str(grado_id).isdigit():
                         inscripciones = inscripciones.filter(grupo__grado_id=int(grado_id))
                     else:
@@ -121,13 +144,10 @@ class AlumnosViewSet(viewsets.ModelViewSet):
                         inscripciones = inscripciones.filter(grupo__seccion__nombre_seccion=str(seccion_id))
                 if estado:
                     inscripciones = inscripciones.filter(estado_inscripcion=estado)
-                alumno_ids = list(inscripciones.values_list('alumno_id', flat=True).distinct())
-            except (ValueError, TypeError, OverflowError):
-                # Valores inválidos → devolver todos los alumnos
-                alumno_ids = []
-
-            if alumno_ids:
+                alumno_ids = inscripciones.values_list('alumno_id', flat=True).distinct()
                 qs = qs.filter(id_alumno__in=alumno_ids)
+            except (ValueError, TypeError, OverflowError):
+                qs = qs.none()
 
         # Optimización N+1: precarga de relaciones para serialización
         # select_related: FK directas (1:1 o N:1)
@@ -180,32 +200,38 @@ class AlumnosViewSet(viewsets.ModelViewSet):
     @swagger_auto_schema(
         operation_description='Obtener alumnos por sección',
         manual_parameters=[
+            openapi.Parameter('token', openapi.IN_QUERY, description='Token de acceso del formulario de notas', type=openapi.TYPE_STRING, required=True),
             openapi.Parameter('grado', openapi.IN_QUERY, description='ID del grado', type=openapi.TYPE_INTEGER),
-            openapi.Parameter('seccion', openapi.IN_QUERY, description='ID de la sección', type=openapi.TYPE_INTEGER),
+            openapi.Parameter('seccion', openapi.IN_QUERY, description='Nombre de la sección (ej. A, B, C, Única)', type=openapi.TYPE_STRING),
             openapi.Parameter('periodo', openapi.IN_QUERY, description='ID del período (opcional)', type=openapi.TYPE_INTEGER, required=False),
         ],
-        responses={200: AlumnosSerializer(many=True)}
+        responses={200: AlumnosSerializer(many=True), 401: 'Token inválido o expirado'}
     )
-    @action(detail=False, methods=['get'])
+    @action(
+        detail=False,
+        methods=['get'],
+        authentication_classes=[URLTokenAuthentication],
+        permission_classes=[permissions.IsAuthenticated],
+    )
     def por_seccion(self, request):
         """
         Obtener alumnos activos por grado y sección.
-        Ejemplo: GET /api/academico/alumnos/por_seccion/?grado=1&seccion=1&periodo=1
+        Ejemplo: GET /api/academico/alumnos/por_seccion/?grado=1&seccion=A&periodo=1
         """
         grado_id = request.query_params.get('grado')
-        seccion_id = request.query_params.get('seccion')
+        seccion_nombre = request.query_params.get('seccion')
         periodo_id = request.query_params.get('periodo')
 
-        if not grado_id or not seccion_id:
+        if not grado_id or not seccion_nombre:
             return Response(
                 {'error': 'Parámetros grado y seccion son requeridos'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Filtrar grupos por grado, sección y opcionalmente por período
+        # Filtrar grupos por grado y sección (por nombre de sección, no por ID)
         grupos_query = GruposAcademicos.objects.filter(
             grado_id=grado_id,
-            seccion_id=seccion_id
+            seccion__nombre_seccion__iexact=seccion_nombre
         )
 
         if periodo_id:
@@ -236,19 +262,16 @@ class AlumnosViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-excel')
     def exportar_alumnos_excel(self, request):
-        """Encolar exportación asíncrona a Excel (responde 202 con el reporte_id)."""
-        qs = self.get_queryset()
+        """Descargar directamente el Excel completo, aplicando los filtros."""
+        qs = self.filter_queryset(self.get_queryset())
 
         if not qs.exists():
             return Response(
-                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'detail': 'No hay alumnos que coincidan con los filtros especificados.'},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(
-            _respuesta_reporte_encolado('alumnos', 'excel', qs),
-            status=status.HTTP_202_ACCEPTED
-        )
+        return exportar_alumnos_excel(qs)
 
     @swagger_auto_schema(
         method='GET',
@@ -263,29 +286,31 @@ class AlumnosViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-pdf')
     def exportar_alumnos_pdf(self, request):
-        """Encolar exportación asíncrona a PDF (responde 202 con el reporte_id)."""
-        qs = self.get_queryset()
+        """Descargar directamente el PDF de datos principales."""
+        qs = self.filter_queryset(self.get_queryset())
 
         if not qs.exists():
             return Response(
-                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'detail': 'No hay alumnos que coincidan con los filtros especificados.'},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-        return Response(
-            _respuesta_reporte_encolado('alumnos', 'pdf', qs),
-            status=status.HTTP_202_ACCEPTED
+        return exportar_alumnos_pdf(
+            qs,
+            grado_id=request.query_params.get('grado'),
+            seccion_id=request.query_params.get('seccion'),
+            estado=request.query_params.get('estado'),
         )
 
     @action(detail=False, methods=['get'], url_path='exportar-alumnos-csv')
     def exportar_alumnos_csv(self, request):
         """Exportar a CSV los alumnos filtrados por grado/seccion/estado (get_queryset)."""
-        qs = self.get_queryset()
+        qs = self.filter_queryset(self.get_queryset())
 
         if not qs.exists():
             return Response(
-                {'error': 'No hay alumnos que coincidan con los filtros especificados'},
-                status=status.HTTP_400_BAD_REQUEST
+                {'detail': 'No hay alumnos que coincidan con los filtros especificados.'},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         response = exportar_alumnos_csv(qs)
@@ -477,8 +502,265 @@ class InscripcionesViewSet(viewsets.ModelViewSet):
 
 
 @swagger_auto_schema(tags=['Calificaciones'])
+class EvaluacionesCualitativasAdminAPIView(APIView):
+    permission_classes = [EsAdministrador]
+
+    def _contexto_grupo(self, periodo_id, grado_id, seccion_id):
+        try:
+            periodo_id = int(periodo_id)
+            grado_id = int(grado_id)
+            seccion_id = int(seccion_id)
+        except (ValueError, TypeError):
+            return None, None, Response(
+                {'detail': 'Período, grado y sección deben ser identificadores numéricos.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            periodo = PeriodoCalificacion.objects.get(pk=periodo_id)
+        except PeriodoCalificacion.DoesNotExist:
+            return None, None, Response(
+                {'detail': 'El período de calificación no existe.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        grupo = (
+            GruposAcademicos.objects
+            .select_related('nivel', 'grado__id_nivel')
+            .filter(
+                grado_id=grado_id,
+                seccion_id=seccion_id,
+                periodo__activo=True,
+            )
+            .order_by('-periodo__fecha_inicio', 'id_grupo')
+            .first()
+        )
+        if grupo is None:
+            return periodo, None, Response(
+                {'detail': 'No existe un grupo activo para el grado y la sección seleccionados.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return periodo, grupo, None
+
+    @staticmethod
+    def _nivel_grupo(grupo):
+        nivel = grupo.nivel or grupo.grado.id_nivel
+        nombre = (nivel.nombre_nivel or '').strip().lower()
+        return 'INICIAL' if 'inicial' in nombre or 'preescolar' in nombre else 'PRIMARIA'
+
+    def get(self, request):
+        periodo_id = request.query_params.get('id_periodo')
+        grado_id = request.query_params.get('id_grado')
+        seccion_id = request.query_params.get('id_seccion')
+        if not all((periodo_id, grado_id, seccion_id)):
+            return Response(
+                {'detail': 'Debe indicar período, grado y sección.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        periodo, grupo, error = self._contexto_grupo(periodo_id, grado_id, seccion_id)
+        if error:
+            return error
+
+        criterios = list(
+            CriterioEvaluacion.objects
+            .filter(grupo=grupo, periodos_configurados__periodo=periodo)
+            .distinct()
+            .order_by('materia_nombre', 'id')
+            .values('id', 'materia_nombre', 'descripcion_criterio')
+        )
+        inscripciones = list(
+            Inscripciones.objects
+            .filter(grupo=grupo, estado_inscripcion='Activa')
+            .select_related('alumno')
+            .order_by('alumno__primer_apellido', 'alumno__primer_nombre')
+        )
+        evaluaciones = EvaluacionLapsoCriterio.objects.filter(
+            periodo=periodo,
+            criterio__grupo=grupo,
+            alumno_id__in=[inscripcion.alumno_id for inscripcion in inscripciones],
+        ).values('alumno_id', 'criterio_id', 'indicador', 'sugerencias')
+        evaluaciones_por_alumno = {}
+        for evaluacion in evaluaciones:
+            evaluaciones_por_alumno.setdefault(evaluacion['alumno_id'], []).append({
+                'id_criterio': evaluacion['criterio_id'],
+                'indicador': evaluacion['indicador'],
+                'sugerencias': evaluacion['sugerencias'],
+            })
+
+        return Response({
+            'id_grupo_academico': grupo.id_grupo,
+            'nivel_educativo': self._nivel_grupo(grupo),
+            'criterios': criterios,
+            'alumnos': [
+                {
+                    'id_alumno': inscripcion.alumno_id,
+                    'primer_nombre': inscripcion.alumno.primer_nombre,
+                    'segundo_nombre': inscripcion.alumno.segundo_nombre,
+                    'primer_apellido': inscripcion.alumno.primer_apellido,
+                    'segundo_apellido': inscripcion.alumno.segundo_apellido,
+                    'cedula_escolar': inscripcion.alumno.cedula_escolar,
+                    'evaluaciones': evaluaciones_por_alumno.get(inscripcion.alumno_id, []),
+                }
+                for inscripcion in inscripciones
+            ],
+        })
+
+    def post(self, request):
+        periodo_id = request.data.get('id_periodo')
+        grado_id = request.data.get('id_grado')
+        seccion_id = request.data.get('id_seccion')
+        if not all((periodo_id, grado_id, seccion_id)):
+            return Response(
+                {'detail': 'Debe indicar período, grado y sección.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        periodo, grupo, error = self._contexto_grupo(periodo_id, grado_id, seccion_id)
+        if error:
+            return error
+
+        serializer = CargaMasivaCriteriosSerializer(data={
+            'id_grupo_academico': grupo.id_grupo,
+            'nivel_educativo': self._nivel_grupo(grupo),
+            'alumnos_evaluaciones': request.data.get('alumnos_evaluaciones', []),
+        })
+        if not serializer.is_valid():
+            return Response(
+                {'detail': 'Los datos de calificación no son válidos.', 'errors': serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        alumnos_permitidos = set(
+            Inscripciones.objects.filter(
+                grupo=grupo,
+                estado_inscripcion='Activa',
+            ).values_list('alumno_id', flat=True)
+        )
+        criterios_permitidos = set(
+            CriterioEvaluacion.objects.filter(
+                grupo=grupo,
+                periodos_configurados__periodo=periodo,
+            ).values_list('id', flat=True)
+        )
+        for alumno_data in serializer.validated_data['alumnos_evaluaciones']:
+            if alumno_data['id_alumno'] not in alumnos_permitidos:
+                return Response(
+                    {'detail': 'La lista contiene un alumno que no pertenece a la sección activa.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            for evaluacion in alumno_data['evaluaciones']:
+                if evaluacion['id_criterio'] not in criterios_permitidos:
+                    return Response(
+                        {'detail': 'La lista contiene un criterio que no pertenece a la sección seleccionada.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        try:
+            resumen = serializer.guardar_lote_criterios(periodo_objeto=periodo)
+        except (ValidationError, exceptions.ValidationError) as exc:
+            detalle = getattr(exc, 'message_dict', None)
+            if detalle is None:
+                detalle = getattr(exc, 'detail', getattr(exc, 'messages', str(exc)))
+            return Response(
+                {'detail': 'No se pudieron guardar las calificaciones.', 'errors': detalle},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'success': True, **resumen}, status=status.HTTP_200_OK)
+
+
+class CriteriosEvaluacionAdminAPIView(EvaluacionesCualitativasAdminAPIView):
+    def post(self, request):
+        periodo, grupo, error = self._contexto_grupo(
+            request.data.get('id_periodo'),
+            request.data.get('id_grado'),
+            request.data.get('id_seccion'),
+        )
+        if error:
+            return error
+
+        materia = request.data.get('materia_nombre', '')
+        descripcion = request.data.get('descripcion_criterio')
+        if not isinstance(materia, str) or not isinstance(descripcion, str):
+            return Response(
+                {'detail': 'La descripción del criterio debe ser texto.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        materia = materia.strip()
+        descripcion = descripcion.strip()
+        if not descripcion:
+            return Response(
+                {'detail': 'La descripción del criterio es obligatoria.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(materia) > 100 or len(descripcion) > 255:
+            return Response(
+                {'detail': 'La descripción admite hasta 255 caracteres.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        criterio, _ = CriterioEvaluacion.objects.get_or_create(
+            grupo=grupo,
+            descripcion_criterio=descripcion,
+            defaults={'materia_nombre': materia},
+        )
+        _, asignado = CriterioPeriodo.objects.get_or_create(
+            criterio=criterio,
+            periodo=periodo,
+        )
+        return Response(
+            {
+                'id': criterio.id,
+                'materia_nombre': criterio.materia_nombre,
+                'descripcion_criterio': criterio.descripcion_criterio,
+            },
+            status=status.HTTP_201_CREATED if asignado else status.HTTP_200_OK,
+        )
+
+    def delete(self, request):
+        periodo, grupo, error = self._contexto_grupo(
+            request.query_params.get('id_periodo'),
+            request.query_params.get('id_grado'),
+            request.query_params.get('id_seccion'),
+        )
+        if error:
+            return error
+        try:
+            criterio_id = int(request.query_params.get('id_criterio'))
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'Debe indicar un criterio válido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        asignacion = CriterioPeriodo.objects.filter(
+            criterio_id=criterio_id,
+            criterio__grupo=grupo,
+            periodo=periodo,
+        ).first()
+        if asignacion is None:
+            return Response(
+                {'detail': 'El criterio no está asignado a esta sección y período.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        tiene_evaluaciones = EvaluacionLapsoCriterio.objects.filter(
+            criterio_id=criterio_id, periodo=periodo,
+        ).exists() or AprendizajeAlcanzado.objects.filter(
+            criterio_id=criterio_id, periodo=periodo,
+        ).exists()
+        if tiene_evaluaciones:
+            return Response(
+                {'detail': 'No se puede retirar un criterio que ya tiene calificaciones guardadas en este período.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        asignacion.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@swagger_auto_schema(tags=['Calificaciones'])
 class CalificacionesViewSet(viewsets.ModelViewSet):
-    queryset = Calificaciones.objects.select_related('inscripcion__alumno', 'id_profesor')
+    queryset = Calificaciones.objects.select_related('inscripcion__alumno', 'profesor')
     serializer_class = CalificacionesSerializer
     permission_classes = [EsProfesorOAdmin]
     filterset_fields = ['inscripcion', 'id_profesor', 'calificacion']
@@ -553,7 +835,7 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
         if not grupo_id:
             return Response({'error': 'Parámetro grupo_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1 solo SQL: filtrado + agregación (antes 4 .count() secuenciales).
+        # 1 solo SQL: filtrado + agregación
         queryset = AsistenciasService.obtener_queryset_filtrado(
             grupo_id=grupo_id,
             fecha_inicio=fecha_inicio,
@@ -592,7 +874,7 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
         if not alumno_id:
             return Response({'error': 'Parámetro alumno_id es requerido'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 1 solo SQL: filtrado + agregación (antes 4 .count() secuenciales).
+        # 1 solo SQL: filtrado + agregación
         queryset = AsistenciasService.obtener_queryset_filtrado(
             alumno_id=alumno_id,
             fecha_inicio=fecha_inicio,
@@ -611,6 +893,84 @@ class AsistenciasViewSet(viewsets.ModelViewSet):
             'fecha_inicio': fecha_inicio,
             'fecha_fin': fecha_fin,
             'estadisticas': estadisticas,
+        })
+
+    @swagger_auto_schema(
+        operation_description='Obtener estadísticas generales del plantel',
+        manual_parameters=[
+            openapi.Parameter('fecha_inicio', openapi.IN_QUERY, description='Fecha inicio (YYYY-MM-DD)', type=openapi.TYPE_STRING),
+            openapi.Parameter('fecha_fin', openapi.IN_QUERY, description='Fecha fin (YYYY-MM-DD)', type=openapi.TYPE_STRING),
+        ],
+        responses={200: openapi.Response('Estadísticas generales del plantel')}
+    )
+    @action(detail=False, methods=['get'])
+    def estadisticas_plantel(self, request):
+        """Obtiene estadísticas generales del plantel escolar."""
+        fecha_inicio = request.query_params.get('fecha_inicio')
+        fecha_fin = request.query_params.get('fecha_fin')
+
+        # Estadísticas de alumnos
+        total_alumnos = Alumnos.objects.count()
+
+        # Estadísticas de grupos
+        total_grupos = GruposAcademicos.objects.count()
+
+        # Estadísticas de inscripciones
+        total_inscripciones = Inscripciones.objects.count()
+        inscripciones_activas = Inscripciones.objects.filter(estado_inscripcion='Activa').count()
+
+        # Si hay rango de fechas, calcular estadísticas de asistencia
+        if fecha_inicio and fecha_fin:
+            from datetime import datetime
+            try:
+                inicio = datetime.strptime(fecha_inicio, '%Y-%m-%d')
+                fin = datetime.strptime(fecha_fin, '%Y-%m-%d')
+                queryset = AsistenciasService.obtener_queryset_filtrado(
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                )
+                if queryset.exists():
+                    estadisticas_asistencia = AsistenciasService.calcular_estadisticas_asistencia(queryset)
+                    estadisticas = {
+                        'total_dias': estadisticas_asistencia['total_dias'],
+                        'presentes': estadisticas_asistencia['presentes'],
+                        'ausentes': estadisticas_asistencia['ausentes'],
+                        'justificados': estadisticas_asistencia['justificados'],
+                        'porcentaje_asistencia': estadisticas_asistencia['porcentaje_asistencia'],
+                    }
+                else:
+                    estadisticas = {
+                        'total_dias': 0,
+                        'presentes': 0,
+                        'ausentes': 0,
+                        'justificados': 0,
+                        'porcentaje_asistencia': 0,
+                    }
+            except Exception:
+                estadisticas = {
+                    'total_dias': 0,
+                    'presentes': 0,
+                    'ausentes': 0,
+                    'justificados': 0,
+                    'porcentaje_asistencia': 0,
+                }
+        else:
+            estadisticas = {
+                'total_dias': 0,
+                'presentes': 0,
+                'ausentes': 0,
+                'justificados': 0,
+                'porcentaje_asistencia': 0,
+            }
+
+        return Response({
+            'total_alumnos': total_alumnos,
+            'total_grupos': total_grupos,
+            'total_inscripciones': total_inscripciones,
+            'inscripciones_activas': inscripciones_activas,
+            'fecha_inicio': fecha_inicio,
+            'fecha_fin': fecha_fin,
+            'estadisticas_asistencia': estadisticas,
         })
 
 @swagger_auto_schema(
@@ -677,6 +1037,37 @@ def exportar_asistencias_pdf(request):
         fecha_fin=fecha_fin,
     )
     return generar_asistencias_pdf(queryset, fecha_inicio, fecha_fin)
+
+
+@swagger_auto_schema(
+    method='GET',
+    operation_description='Generar el resumen estadístico de asistencia del día 26 del mes anterior al día 25 del mes seleccionado',
+    tags=['Exportaciones Asistencias'],
+    manual_parameters=[
+        openapi.Parameter('grupo_id', openapi.IN_QUERY, description='Grupo académico', type=openapi.TYPE_INTEGER, required=True),
+        openapi.Parameter('year', openapi.IN_QUERY, description='Año del reporte', type=openapi.TYPE_INTEGER, required=True),
+        openapi.Parameter('month', openapi.IN_QUERY, description='Mes del reporte (1-12)', type=openapi.TYPE_INTEGER, required=True),
+    ],
+    responses={200: openapi.Response('Resumen estadístico mensual PDF')},
+)
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def exportar_estadistica_mensual_pdf(request):
+    try:
+        grupo_id = int(request.query_params.get('grupo_id'))
+        año = int(request.query_params.get('year'))
+        mes = int(request.query_params.get('month'))
+        date(año, mes, 1)
+    except (TypeError, ValueError):
+        return Response(
+            {'detail': 'grupo_id, year y month son obligatorios; month debe estar entre 1 y 12.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not GruposAcademicos.objects.filter(id_grupo=grupo_id).exists():
+        return Response({'detail': 'El grupo seleccionado no existe.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return generar_estadistica_mensual_pdf(grupo_id, año, mes)
 
 @swagger_auto_schema(
     method='GET',
@@ -831,9 +1222,7 @@ def webhook_google_forms(request):
         )
 
 
-# ============================================================================
 # ENDPOINTS DE CONSULTA/DESCARGA DE REPORTES ASÍNCRONOS (Misión 10)
-# ============================================================================
 
 @api_view(['GET'])
 @permission_classes([EsProfesorOAdmin])
@@ -870,9 +1259,7 @@ def descargar_exportacion(request, reporte_id):
     )
 
 
-# ============================================================================
 # ENDPOINT DE INSCRIPCIÓN CON REPRESENTANTE ANIDADO
-# ============================================================================
 
 class AlumnoInscripcionAPIView(APIView):
     """
@@ -938,9 +1325,7 @@ class AlumnoInscripcionAPIView(APIView):
         )
 
 
-# ============================================================================
 # ENDPOINTS DE CONTROL DINÁMICO DE INSCRIPCIONES EXTERNAS
-# ============================================================================
 
 class InscripcionDocenteExternaAPIView(APIView):
     """
@@ -1116,9 +1501,7 @@ class AlternarUrlInscripcionAPIView(APIView):
         )
 
 
-# ============================================================================
 # ENDPOINTS DE PERIODOS DE INSCRIPCION (ADMIN): LISTADO, CREACIÓN Y EDICIÓN
-# ============================================================================
 
 class PeriodoInscripcionListCreateAPIView(ListCreateAPIView):
     """
@@ -1164,6 +1547,25 @@ class PeriodoInscripcionListCreateAPIView(ListCreateAPIView):
     )
     def post(self, request, *args, **kwargs):
         return super().post(request, *args, **kwargs)
+
+
+class PeriodoInscripcionPublicoAPIView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, token, *args, **kwargs):
+        try:
+            periodo = PeriodoInscripcion.objects.get(token_acceso=token)
+        except PeriodoInscripcion.DoesNotExist:
+            return Response(
+                {'detail': 'El enlace de inscripción no existe.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({
+            'nombre': periodo.nombre,
+            'fecha_inicio': periodo.fecha_inicio,
+            'fecha_fin': periodo.fecha_fin,
+            'activo_manual': periodo.activo_manual,
+        })
 
 
 class PeriodoInscripcionDetailAPIView(RetrieveUpdateDestroyAPIView):
@@ -1527,9 +1929,204 @@ class DescargaInformeDescriptivoAPIView(APIView):
         return response
 
 
-# ============================================================================
+def _obtener_contexto_boleta_cualitativa(alumno_id, periodo_id):
+    alumno = Alumnos.objects.select_related('id_profesor_encargado').get(pk=alumno_id)
+    periodo = PeriodoCalificacion.objects.get(pk=periodo_id)
+    evaluaciones = list(
+        EvaluacionLapsoCriterio.objects.filter(
+            alumno=alumno,
+            periodo=periodo,
+        ).select_related('criterio')
+    )
+    aprendizajes_alcanzados = [
+        {
+            'texto': aprendizaje.texto,
+            'sugerencias': aprendizaje.sugerencias,
+            'indicador': aprendizaje.indicador,
+            'orden': aprendizaje.orden,
+            'criterio_id': aprendizaje.criterio_id,
+            'criterio_nombre': (
+                aprendizaje.criterio.descripcion_criterio
+                if aprendizaje.criterio else ''
+            ),
+        }
+        for aprendizaje in AprendizajeAlcanzado.objects.filter(
+            alumno=alumno,
+            periodo=periodo,
+        ).select_related('criterio').order_by('orden', 'id')
+    ]
+
+    inscripcion = Inscripciones.objects.filter(
+        alumno=alumno,
+        estado_inscripcion='Activa',
+    ).select_related(
+        'grupo__grado',
+        'grupo__seccion',
+        'grupo__periodo',
+        'grupo__profesor_director',
+    ).first()
+
+    datos_grupo = {}
+    if inscripcion and inscripcion.grupo:
+        grupo = inscripcion.grupo
+        docente = grupo.profesor_director or alumno.id_profesor_encargado
+        representante = alumno.representantes_vinculados.filter(
+            es_principal=True,
+        ).select_related('representante').first()
+        nombre_representante = ''
+        if representante and representante.representante:
+            persona = representante.representante
+            nombre_representante = ' '.join(filter(None, [
+                persona.primer_nombre,
+                persona.segundo_nombre,
+                persona.primer_apellido,
+                persona.segundo_apellido,
+            ])).strip()
+        nombre_docente = ' '.join(filter(None, [
+            getattr(docente, 'primer_nombre', None),
+            getattr(docente, 'segundo_nombre', None),
+            getattr(docente, 'primer_apellido', None),
+            getattr(docente, 'segundo_apellido', None),
+        ])).strip()
+        datos_grupo = {
+            'grado': grupo.grado.nombre_grado,
+            'seccion': grupo.seccion.nombre_seccion,
+            'docente': nombre_docente,
+            'proyecto_aprendizaje': getattr(grupo, 'observaciones', ''),
+            'periodo_escolar': grupo.periodo.nombre_periodo if grupo.periodo else '',
+            'representante': nombre_representante,
+        }
+
+    return alumno, periodo, evaluaciones, datos_grupo, aprendizajes_alcanzados
+
+
+class DescargaBoletaCualitativaAPIView(APIView):
+    """
+    Endpoint para descargar la Boleta Cualitativa (Informe Descriptivo)
+    con el formato especificado en el Excel.
+
+    - GET /api/academico/calificaciones/boleta-cualitativa-pdf/<int:alumno_id>/<int:periodo_id>/
+
+    Requiere autenticación JWT (IsAuthenticated).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        id_alumno = kwargs.get('alumno_id') or request.query_params.get('id_alumno')
+        id_periodo = kwargs.get('periodo_id') or request.query_params.get('id_periodo')
+
+        if not id_alumno or not id_periodo:
+            return Response(
+                {'success': False, 'error': 'Se requieren id_alumno e id_periodo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            (
+                alumno,
+                periodo,
+                evaluaciones,
+                datos_grupo,
+                aprendizajes_alcanzados,
+            ) = _obtener_contexto_boleta_cualitativa(id_alumno, id_periodo)
+
+            pdf_buffer = generar_pdf_boleta_cualitativa(
+                alumno=alumno,
+                periodo=periodo,
+                evaluaciones=evaluaciones,
+                datos_grupo=datos_grupo,
+                aprendizajes_alcanzados=aprendizajes_alcanzados,
+            )
+
+            cedula = alumno.cedula_escolar or alumno.numero_documento_identidad or ''
+            nombre_archivo = f"Boleta_Cualitativa_{alumno.primer_nombre}_{alumno.primer_apellido}_{cedula.replace('/', '_')}.pdf"
+
+        except Alumnos.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PeriodoCalificacion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Periodo no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as exc:
+            logger.error('Error generando boleta cualitativa: %s', exc, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error generando la boleta cualitativa.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response = FileResponse(
+            pdf_buffer,
+            content_type='application/pdf',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+        return response
+
+
+class DescargaBoletaCualitativaExcelAPIView(APIView):
+    """Descarga la boleta cualitativa individual en la plantilla Excel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        id_alumno = kwargs.get('alumno_id') or request.query_params.get('id_alumno')
+        id_periodo = kwargs.get('periodo_id') or request.query_params.get('id_periodo')
+        if not id_alumno or not id_periodo:
+            return Response(
+                {'success': False, 'error': 'Se requieren id_alumno e id_periodo.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            (
+                alumno,
+                periodo,
+                evaluaciones,
+                datos_grupo,
+                aprendizajes_alcanzados,
+            ) = _obtener_contexto_boleta_cualitativa(id_alumno, id_periodo)
+            excel_buffer = generar_excel_boleta_cualitativa(
+                alumno=alumno,
+                periodo=periodo,
+                evaluaciones=evaluaciones,
+                datos_grupo=datos_grupo,
+                aprendizajes_alcanzados=aprendizajes_alcanzados,
+            )
+            cedula = alumno.cedula_escolar or alumno.numero_documento_identidad or ''
+            nombre_archivo = (
+                f"Boleta_Cualitativa_{alumno.primer_nombre}_"
+                f"{alumno.primer_apellido}_{cedula.replace('/', '_')}.xlsx"
+            )
+        except Alumnos.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except PeriodoCalificacion.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Periodo no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except Exception as exc:
+            logger.error('Error generando boleta cualitativa Excel: %s', exc, exc_info=True)
+            return Response(
+                {'success': False, 'error': 'Error generando la boleta cualitativa Excel.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        response = FileResponse(
+            excel_buffer,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{nombre_archivo}"'
+        return response
+
+
 # SERVICIO B: CONSTANCIA DE PROSECUCIÓN FINAL (VEREDICTO ANUAL DE JULIO)
-# ============================================================================
 
 class RegistrarConstanciaProsecucionAPIView(APIView):
     """
@@ -1599,4 +2196,3 @@ class DescargaConstanciaProsecucionAPIView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
-

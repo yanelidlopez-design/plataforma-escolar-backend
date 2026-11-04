@@ -1,0 +1,36 @@
+:80 {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /admin* {
+		respond "Not found" 404
+	}
+
+	handle /swagger* {
+		respond "Not found" 404
+	}
+
+	handle /redoc* {
+		respond "Not found" 404
+	}
+
+	handle_path /static/* {
+		root * /srv/static
+		file_server
+	}
+
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

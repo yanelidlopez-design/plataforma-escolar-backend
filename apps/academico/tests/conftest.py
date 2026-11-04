@@ -14,13 +14,19 @@ from django.db import connection
 
 from apps.academico.models import Alumnos
 from apps.core.models import Direcciones, Usuarios
-from apps.personal.models import AlumnoRepresentante, Profesores, RepresentantesLegales
+from apps.personal.models import (
+    AlumnoRepresentante,
+    HijosPersonal,
+    Profesores,
+    RepresentantesLegales,
+)
 
 # Orden: primero las referenciadas por FK de las demás.
 MODELOS_LEGACY = [
     Usuarios,
     Direcciones,
     Profesores,
+    HijosPersonal,
     RepresentantesLegales,
     Alumnos,
     AlumnoRepresentante,

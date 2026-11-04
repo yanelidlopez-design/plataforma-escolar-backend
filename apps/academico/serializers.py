@@ -73,6 +73,10 @@ class AlumnosSerializer(serializers.ModelSerializer):
     grado_actual = serializers.SerializerMethodField()
     seccion_actual = serializers.SerializerMethodField()
     profesor_encargado = serializers.SerializerMethodField()
+    # Campos adicionales para boletas cualitativas
+    edad = serializers.SerializerMethodField()
+    representante_principal = serializers.SerializerMethodField()
+    proyecto_aprendizaje = serializers.SerializerMethodField()
 
     class Meta:
         model = Alumnos
@@ -133,6 +137,41 @@ class AlumnosSerializer(serializers.ModelSerializer):
             return inscripcion.grupo_id if inscripcion else None
         except Exception:
             return None
+
+    def get_edad(self, obj):
+        """Calcula la edad del alumno a partir de su fecha de nacimiento."""
+        from django.utils import timezone
+        try:
+            if obj.fecha_nacimiento:
+                today = timezone.now().date()
+                birth_date = obj.fecha_nacimiento
+                age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+                return age
+        except Exception:
+            logger.debug('Error calculando edad para alumno %s', obj.pk, exc_info=True)
+        return None
+
+    def get_representante_principal(self, obj):
+        """Obtiene el nombre del representante principal del alumno."""
+        try:
+            rep_vinculado = obj.representantes_vinculados.filter(es_principal=True).first()
+            if rep_vinculado and rep_vinculado.representante:
+                rep = rep_vinculado.representante
+                return f"{rep.primer_nombre} {rep.primer_apellido}".strip()
+        except Exception:
+            logger.debug('Error obteniendo representante principal para alumno %s', obj.pk, exc_info=True)
+        return None
+
+    def get_proyecto_aprendizaje(self, obj):
+        """Obtiene el proyecto de aprendizaje (PA) del grupo del alumno."""
+        try:
+            inscripcion = obj.inscripciones.filter(estado_inscripcion='Activa').first()
+            if inscripcion and inscripcion.grupo:
+                # Usar observaciones del grupo o un campo específico si existe
+                return inscripcion.grupo.observaciones if hasattr(inscripcion.grupo, 'observaciones') else None
+        except Exception:
+            logger.debug('Error obteniendo proyecto de aprendizaje para alumno %s', obj.pk, exc_info=True)
+        return None
 
     def validate_id_grupo(self, value):
         if value is not None and not GruposAcademicos.objects.filter(pk=value).exists():
@@ -195,7 +234,20 @@ class AlumnosSerializer(serializers.ModelSerializer):
         return data
 
     def validate(self, attrs):
-        """El parentesco solo tiene sentido si se envían los datos del representante."""
+        """Valida egreso/retiro y la consistencia de los datos del representante."""
+        estatus = attrs.get(
+            'estatus_general',
+            getattr(self.instance, 'estatus_general', None),
+        )
+        fecha_egreso = attrs.get(
+            'fecha_egreso',
+            getattr(self.instance, 'fecha_egreso', None),
+        )
+        if estatus in ('Egresado', 'Retirado') and not fecha_egreso:
+            raise serializers.ValidationError({
+                'fecha_egreso': 'Indique la fecha real de egreso o retiro.'
+            })
+
         if attrs.get('parentesco') and not attrs.get('representante'):
             raise serializers.ValidationError(
                 {'representante': 'Debe indicar los datos del representante si envía el parentesco.'}
@@ -359,9 +411,9 @@ class InscripcionesSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class CalificacionesSerializer(serializers.ModelSerializer):
-    alumno_nombre = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_nombre')
-    alumno_apellido = serializers.ReadOnlyField(source='inscripcion.id_alumno.primer_apellido')
-    profesor_nombre = serializers.ReadOnlyField(source='id_profesor.primer_nombre')
+    alumno_nombre = serializers.ReadOnlyField(source='inscripcion.alumno.primer_nombre')
+    alumno_apellido = serializers.ReadOnlyField(source='inscripcion.alumno.primer_apellido')
+    profesor_nombre = serializers.ReadOnlyField(source='profesor.primer_nombre')
 
     class Meta:
         model = Calificaciones
@@ -384,6 +436,12 @@ class AsistenciasSerializer(serializers.ModelSerializer):
     class Meta:
         model = Asistencias
         fields = '__all__'
+        read_only_fields = ('id_asistencia', 'fecha_registro')
+        # Se desactiva el UniqueTogetherValidator automático de DRF porque
+        # el create() del ViewSet usa update_or_create() para manejar la
+        # unicidad (fecha, alumno, grupo) y permitir actualizar en lugar de
+        # fallar con error de validación.
+        validators = []
 
     def validate_estado(self, value):
         opciones_validas = ['P', 'A', 'J']
@@ -439,6 +497,8 @@ class AlumnoInscripcionSerializer(serializers.Serializer):
     peso_kg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     talla_cm = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     fecha_inscripcion_inicial = serializers.DateField(required=False, allow_null=True)
+    fecha_egreso = serializers.DateField(required=False, allow_null=True)
+    repitiente = serializers.BooleanField(required=False, default=False)
     estatus_general = serializers.CharField(max_length=50, required=False, allow_blank=True, allow_null=True)
 
     # --- Datos adicionales del alumno (formulario completo de inscripción) ---
@@ -775,6 +835,8 @@ class EvaluacionCriterioInputSerializer(serializers.Serializer):
     )
     indicador = serializers.CharField(
         max_length=2,
+        required=False,
+        allow_blank=True,
         help_text='Indicador cualitativo: PL, L, PM, EP o I.',
     )
     sugerencias = serializers.CharField(
@@ -787,12 +849,22 @@ class EvaluacionCriterioInputSerializer(serializers.Serializer):
     def validate_indicador(self, valor):
         """Valida estrictamente que el indicador sea una de las constantes cualitativas."""
         valor = (valor or '').strip().upper()
+        if not valor:
+            return valor
         validos = [c[0] for c in self.INDICADOR_CHOICES]
         if valor not in validos:
             raise serializers.ValidationError(
                 f'Indicador inválido "{valor}". Use uno de: {", ".join(validos)}.'
             )
         return valor
+
+
+class AprendizajeAlcanzadoInputSerializer(serializers.Serializer):
+    texto = serializers.CharField(max_length=4000, trim_whitespace=True)
+    indicador = serializers.ChoiceField(choices=EvaluacionCriterioInputSerializer.INDICADOR_CHOICES)
+    sugerencias = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    id_criterio = serializers.IntegerField(required=False, allow_null=True)
+    orden = serializers.IntegerField(required=False, min_value=0)
 
 
 class AlumnoCriteriosPayloadSerializer(serializers.Serializer):
@@ -813,8 +885,15 @@ class AlumnoCriteriosPayloadSerializer(serializers.Serializer):
     id_alumno = serializers.IntegerField(
         help_text='ID del estudiante.'
     )
+    aprendizajes_alcanzados = AprendizajeAlcanzadoInputSerializer(
+        many=True,
+        required=False,
+        help_text='Metas de aprendizaje con indicador individual para este alumno.',
+    )
     evaluaciones = EvaluacionCriterioInputSerializer(
         many=True,
+        required=False,
+        default=list,
         help_text='Lista de criterios evaluados a este alumno específico.',
     )
 
@@ -902,8 +981,20 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
         # Cada entrada: alumno_id, criterio_id, literal (indicador),
         # informe_descriptivo (sugerencias).
         lote_datos = []
+        aprendizajes_por_alumno = {}
         for alumno_payload in items:
             id_alumno = alumno_payload['id_alumno']
+            aprendizajes = alumno_payload.get('aprendizajes_alcanzados') or []
+            if 'aprendizajes_alcanzados' in alumno_payload:
+                aprendizajes_por_alumno[id_alumno] = aprendizajes
+            for aprendizaje in aprendizajes:
+                if aprendizaje.get('id_criterio'):
+                    lote_datos.append({
+                        'alumno_id': id_alumno,
+                        'criterio_id': aprendizaje['id_criterio'],
+                        'literal': aprendizaje['indicador'],
+                        'informe_descriptivo': aprendizaje.get('sugerencias') or '',
+                    })
             for eval_item in alumno_payload['evaluaciones']:
                 lote_datos.append({
                     'alumno_id': id_alumno,
@@ -917,6 +1008,7 @@ class CargaMasivaCriteriosSerializer(serializers.Serializer):
                 periodo_id=periodo_id,
                 nivel_educativo=nivel_educativo,
                 lote_datos=lote_datos,
+                aprendizajes_por_alumno=aprendizajes_por_alumno,
             )
         except Exception as e:
             mensaje = getattr(e, 'message', str(e))
@@ -969,4 +1061,3 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
                     ]
                 }
             )
-

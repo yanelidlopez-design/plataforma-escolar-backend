@@ -1,5 +1,6 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, filters, status
 from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.response import Response
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from django.http import FileResponse, HttpResponse
@@ -14,27 +15,30 @@ from .reports_personal import (
 )
 from .serializers import ProfesoresSerializer, RepresentantesLegalesSerializer, AlumnoRepresentanteSerializer
 from .services import PersonalService
+from apps.core.serializers import RestablecerContrasenaSerializer
+from apps.academico.permissions import EsAdministrador
 
 
 @swagger_auto_schema(tags=['Personal'])
 class PersonalViewSet(viewsets.ModelViewSet):
-    queryset = Profesores.objects.select_related('id_usuario').all()
+    queryset = Profesores.objects.select_related('id_usuario').prefetch_related('hijos')
     serializer_class = ProfesoresSerializer
-    search_fields = ['cedula', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'categoria']
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['cedula', 'primer_nombre', 'segundo_nombre', 'primer_apellido', 'segundo_apellido', 'cargo']
 
     def get_queryset(self):
         """
         Filtrado manual por query params (django-filter NO está disponible):
-        GET /api/personal/personal/?categoria=Profesor
-        Categorías inválidas se ignoran limpiamente (fail-soft en lectura);
-        la validación estricta de categorías ocurre en el POST (serializer).
+        GET /api/personal/personal/?cargo=Profesor
+        Cargos inválidos se ignoran limpiamente (fail-soft en lectura);
+        la validación estricta de cargos ocurre en el POST (serializer).
         """
         qs = super().get_queryset()
-        categoria = (self.request.query_params.get('categoria') or '').strip()
-        if categoria:
-            validas = {codigo for codigo, _ in Profesores.CATEGORIA_CHOICES}
-            if categoria in validas:
-                qs = qs.filter(categoria=categoria)
+        cargo = (self.request.query_params.get('cargo') or '').strip()
+        if cargo:
+            validos = {codigo for codigo, _ in Profesores.CARGO_CHOICES}
+            if cargo in validos:
+                qs = qs.filter(cargo=cargo)
         return qs
 
     def perform_create(self, serializer):
@@ -51,21 +55,45 @@ class PersonalViewSet(viewsets.ModelViewSet):
         """
         serializer.instance = PersonalService.crear_personal_con_usuario(
             serializer.validated_data,
-            self.request.data.get('email'),
+            self.request.data.get('email') or self.request.data.get('correo'),
         )
+
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='restablecer-password',
+        permission_classes=[EsAdministrador],
+    )
+    def restablecer_password(self, request, pk=None):
+        persona = self.get_object()
+        if not persona.id_usuario:
+            return Response(
+                {'detail': 'Este registro de personal no tiene una cuenta de usuario vinculada.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        serializer = RestablecerContrasenaSerializer(
+            data=request.data,
+            context={'user': persona.id_usuario},
+        )
+        serializer.is_valid(raise_exception=True)
+        persona.id_usuario.set_password(serializer.validated_data['contrasena_nueva'])
+        persona.id_usuario.save(update_fields=['clave_hash'])
+        return Response({'detail': 'Contraseña restablecida correctamente.'})
 
     @swagger_auto_schema(
         method='GET',
-        operation_description='Exportar personal filtrado por categoría en formato Excel (.xlsx)',
+        operation_description='Exportar personal filtrado por cargo en formato Excel (.xlsx)',
         manual_parameters=[
-            openapi.Parameter('categoria', openapi.IN_QUERY, description='Categoría del personal (opcional)', type=openapi.TYPE_STRING),
+            openapi.Parameter('cargo', openapi.IN_QUERY, description='Cargo del personal (opcional)', type=openapi.TYPE_STRING),
         ],
         responses={200: openapi.Response('Archivo Excel')}
     )
     @action(detail=False, methods=['get'], url_path='exportar-excel')
     def exportar_excel(self, request):
         """Listado en Excel; la maquetación vive en reports_personal (-> BytesIO)."""
-        buffer = generar_excel_personal(self.get_queryset())
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related('hijos')
+        buffer = generar_excel_personal(queryset)
         return FileResponse(
             buffer,
             as_attachment=True,
@@ -75,9 +103,9 @@ class PersonalViewSet(viewsets.ModelViewSet):
 
     @swagger_auto_schema(
         method='GET',
-        operation_description='Exportar personal filtrado por categoría en formato PDF',
+        operation_description='Exportar personal filtrado por cargo en formato PDF',
         manual_parameters=[
-            openapi.Parameter('categoria', openapi.IN_QUERY, description='Categoría del personal (opcional)', type=openapi.TYPE_STRING),
+            openapi.Parameter('cargo', openapi.IN_QUERY, description='Cargo del personal (opcional)', type=openapi.TYPE_STRING),
         ],
         responses={200: openapi.Response('Archivo PDF')}
     )
@@ -85,8 +113,8 @@ class PersonalViewSet(viewsets.ModelViewSet):
     def exportar_pdf(self, request):
         """Listado en PDF; la maquetación vive en reports_personal (-> BytesIO)."""
         buffer = generar_pdf_personal(
-            self.get_queryset(),
-            categoria=(request.query_params.get('categoria') or '').strip(),
+            self.filter_queryset(self.get_queryset()),
+            cargo=(request.query_params.get('cargo') or '').strip(),
         )
         return FileResponse(
             buffer,
@@ -99,21 +127,26 @@ class PersonalViewSet(viewsets.ModelViewSet):
     def exportar_csv(self, request):
         response = HttpResponse(content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="listado_personal.csv"'
+        response.write('\ufeff')
 
         writer = csv.writer(response)
-        writer.writerow(['Cedula', 'Primer Nombre', 'Segundo Nombre', 'Primer Apellido', 'Segundo Apellido', 'Categoria', 'Correo'])
+        writer.writerow([
+            'Cédula', 'Primer Nombre', 'Segundo Nombre', 'Primer Apellido',
+            'Segundo Apellido', 'Cargo', 'Categoría', 'Teléfono', 'Correo',
+        ])
 
-        # get_queryset aplica el filtro ?categoria= recibido en la request
-        for p in self.get_queryset():
-            correo = getattr(p.id_usuario, 'email', '') or ''
+        for p in self.filter_queryset(self.get_queryset()):
+            correo = p.correo or (getattr(p.id_usuario, 'email', '') if p.id_usuario else '') or ''
             writer.writerow([
                 p.cedula,
                 p.primer_nombre,
                 p.segundo_nombre or '',
                 p.primer_apellido,
                 p.segundo_apellido or '',
-                p.categoria,
-                correo or 'No registrado',
+                p.cargo,
+                p.categoria or '',
+                p.telefono or '',
+                correo,
             ])
 
         return response

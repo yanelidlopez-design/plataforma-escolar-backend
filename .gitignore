@@ -1,5 +1,8 @@
 .aider*
 .env
+.env.production
+.env.lan
+/backups/
 # Python
 venv/
 __pycache__/
@@ -8,3 +11,4 @@ __pycache__/
 staticfiles/
 /media/
 *.log
+node_modules

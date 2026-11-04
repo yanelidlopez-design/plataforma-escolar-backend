@@ -123,7 +123,7 @@ class TestVinculacionWebhook:
             cedula='19REMOVED_SECRET',
             primer_nombre='María',
             primer_apellido='López',
-            categoria='Profesor',
+            cargo='Profesor',
         )
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='19REMOVED_SECRET')
@@ -137,7 +137,7 @@ class TestVinculacionWebhook:
             cedula='19555444',
             primer_nombre='María',
             primer_apellido='López',
-            categoria='Profesor',
+            cargo='Profesor',
         )
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='V-19555444')
@@ -151,7 +151,7 @@ class TestVinculacionWebhook:
             cedula='20REMOVED_SECRET',
             primer_nombre='José',
             primer_apellido='Muñoz',
-            categoria='Profesor',
+            cargo='Profesor',
         )
         alumno, error = procesar_alumno_webhook(
             self._payload(profesor_encargado='jose  muñoz')

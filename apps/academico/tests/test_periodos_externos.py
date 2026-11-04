@@ -331,6 +331,26 @@ def test_listar_periodos_exitoso(api_client, usuario_admin, periodo_activo, tabl
     assert any(item['activo_manual'] is True for item in response.data)  # nosec B101
 
 
+@pytest.mark.django_db
+def test_consultar_periodo_publico_por_token_sin_autenticacion(api_client, periodo_activo):
+    """El enlace compartido usa el token, sin exponer el listado administrativo."""
+    url = reverse('periodo_publico', kwargs={'token': periodo_activo.token_acceso})
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert response.data['nombre'] == periodo_activo.nombre  # nosec B101
+    assert response.data['activo_manual'] is True  # nosec B101
+    assert 'token_acceso' not in response.data  # nosec B101
+
+
+@pytest.mark.django_db
+def test_consultar_periodo_publico_token_invalido(api_client):
+    url = reverse('periodo_publico', kwargs={'token': 'token-inexistente'})
+    response = api_client.get(url)
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND  # nosec B101
+
+
 # ---------------------------------------------------------------------------
 # Test 7: Creación de periodos (POST /periodos/)
 # ---------------------------------------------------------------------------
@@ -561,7 +581,7 @@ def test_formulario_profesores_dinamicos(api_client, periodo_activo, tablas_lega
         primer_nombre='Ana',
         primer_apellido='López',
         cedula='V-20200001',
-        categoria='Profesor',
+        cargo='Profesor',
     )
     url = f"{reverse('inscripcion_externa')}?token={periodo_activo.token_acceso}"
     html = api_client.get(url).content.decode()
@@ -579,7 +599,7 @@ def test_inscripcion_externa_con_profesor_encargado(api_client, periodo_activo, 
         primer_nombre='Luis',
         primer_apellido='Márquez',
         cedula='V-20200002',
-        categoria='Integral',
+        cargo='Integral',
     )
     grupo = _crear_grupo_prueba()
     data = _payload_inscripcion(id_grupo=grupo.id_grupo, cedula_rep='V-19888778')

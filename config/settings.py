@@ -3,6 +3,7 @@ from pathlib import Path
 import drf_yasg 
 import sys
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -24,6 +25,11 @@ WEBHOOK_SECRET_TOKEN = env('WEBHOOK_SECRET_TOKEN', default='')
 # Ejemplo: ALLOWED_HOSTS=localhost,127.0.0.1,tudominio.com
 allowed_hosts_str = env('ALLOWED_HOSTS', default='')
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',') if host.strip()] if allowed_hosts_str else []
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured('ALLOWED_HOSTS debe configurarse en producción.')
+# Agregar host interno de Docker para tráfico entre contenedores (proxy de Vite dentro de Docker)
+if 'backend' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('backend')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -119,10 +125,40 @@ REST_FRAMEWORK = {
 # Ejemplo: CORS_ALLOWED_ORIGINS=http://localhost:3000,https://tufrontend.com
 cors_origins_str = env('CORS_ALLOWED_ORIGINS', default='')
 CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins_str.split(',') if origin.strip()] if cors_origins_str else []
+# Agregar orígenes por defecto solo en desarrollo local.
+if DEBUG and not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS = [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://192.168.1.8:3000',
+    ]
 # Usado junto con CORS_ALLOWED_ORIGINS para que el navegador acepte
 # cookies (p. ej. 'access_token') en peticiones cross-origin.
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False
+# CORS_ALLOW_ALL_ORIGINS deshabilitado: se mantiene la lista explícita
+# en CORS_ALLOWED_ORIGINS junto con CORS_ALLOW_CREDENTIALS = True para
+# evitar rechazos de CORS en navegadores con credenciales (cookies/token).
+# CORS_ALLOW_ALL_ORIGINS = True
+
+csrf_origins_str = env('CSRF_TRUSTED_ORIGINS', default='')
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip() for origin in csrf_origins_str.split(',') if origin.strip()
+]
+if not DEBUG and not CSRF_TRUSTED_ORIGINS:
+    raise ImproperlyConfigured('CSRF_TRUSTED_ORIGINS debe configurarse en producción.')
+
+SECURE_SSL_REDIRECT = env.bool('SECURE_SSL_REDIRECT', default=not DEBUG)
+SESSION_COOKIE_SECURE = env.bool('SESSION_COOKIE_SECURE', default=not DEBUG)
+CSRF_COOKIE_SECURE = env.bool('CSRF_COOKIE_SECURE', default=not DEBUG)
+if not DEBUG:
+    # El backend solo debe estar accesible a través del proxy HTTPS de producción.
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_HSTS_SECONDS = env.int('SECURE_HSTS_SECONDS', default=31_536_000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(
+        'SECURE_HSTS_INCLUDE_SUBDOMAINS',
+        default=False,
+    )
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 LANGUAGE_CODE = 'es-es'
 
@@ -162,3 +198,31 @@ SWAGGER_SETTINGS = {
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+EMAIL_BACKEND = env(
+    'EMAIL_BACKEND',
+    default=(
+        'django.core.mail.backends.console.EmailBackend'
+        if DEBUG else 'django.core.mail.backends.smtp.EmailBackend'
+    ),
+)
+EMAIL_HOST = env('EMAIL_HOST', default='')
+EMAIL_PORT = env.int('EMAIL_PORT', default=587)
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=False)
+DEFAULT_FROM_EMAIL = env(
+    'DEFAULT_FROM_EMAIL',
+    default=EMAIL_HOST_USER or 'noreply@localhost',
+)
+FRONTEND_URL = env(
+    'FRONTEND_URL',
+    default='http://localhost:5173' if DEBUG else '',
+)
+PASSWORD_RESET_TIMEOUT = 60 * 60
+
+REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] = {
+    **REST_FRAMEWORK.get('DEFAULT_THROTTLE_RATES', {}),
+    'password_reset': '5/hour',
+}

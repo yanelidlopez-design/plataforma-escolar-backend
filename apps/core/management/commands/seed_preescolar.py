@@ -40,8 +40,8 @@ class Command(BaseCommand):
     CUPO_PREESCOLAR = 20
 
     def _obtener_docente_guia(self):
-        """Primer profesor con categoría 'Profesor' para asignar como director de grupo."""
-        return Profesores.objects.filter(categoria="Profesor").order_by("id_profesor").first()
+        """Primer profesor con cargo 'Profesor' para asignar como director de grupo."""
+        return Profesores.objects.filter(cargo="Profesor").order_by("id_profesor").first()
 
     def handle(self, *args, **options):
         nivel, nivel_creado = NivelesEducativos.objects.get_or_create(

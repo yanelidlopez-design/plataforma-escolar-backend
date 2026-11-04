@@ -1,4 +1,7 @@
 from rest_framework import permissions
+from django.utils import timezone
+
+from apps.academico.models import PeriodoCalificacion
 
 
 # Roles que tienen acceso a los viewsets protegidos.
@@ -86,3 +89,36 @@ class IsAuthenticatedOrReadOnly(permissions.BasePermission):
 
     def has_permission(self, request, view):
         return request.method in permissions.SAFE_METHODS or request.user and request.user.is_authenticated
+
+
+class PeriodoCalificacionAbierto(permissions.BasePermission):
+    """
+    Permiso que verifica que exista al menos un PeriodoCalificacion abierto
+    (activo_manual=True y fecha_limite no vencida).
+
+    Los administradores omiten esta restricción. Los profesores solo pueden
+    crear/editar asistencias y calificaciones mientras el periodo esté abierto.
+
+    Este permiso se usa en conjunto con EsProfesorOAdmin:
+    - EsProfesorOAdmin: verifica que el usuario sea profesor o admin
+    - PeriodoCalificacionAbierto: verifica que el periodo esté abierto
+    """
+
+    def has_permission(self, request, view):
+        rol = obtener_rol_usuario(request.user)
+
+        # Los administradores no están sujetos a la restricción de periodo abierto
+        if rol == 'admin':
+            return True
+
+        # Solo profesores llegan aquí (EsProfesorOAdmin ya filtró)
+        periodo_abierto = PeriodoCalificacion.objects.filter(
+            activo_manual=True,
+            fecha_limite__gt=timezone.now(),
+        ).exists()
+
+        return bool(periodo_abierto)
+
+    def has_object_permission(self, request, view, obj):
+        # Misma lógica para permisos a nivel de objeto
+        return self.has_permission(request, view)

@@ -24,7 +24,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -43,11 +43,20 @@ def _ajustar_ancho_columnas(ws) -> None:
 
 def generar_excel_personal(queryset) -> BytesIO:
     """Listado de personal en Excel (.xlsx) a partir del queryset recibido."""
+    personas = list(queryset)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Personal"
 
-    encabezados = ['Cédula', 'Primer Nombre', 'Primer Apellido', 'Categoría', 'Teléfono', 'Correo']
+    encabezados = [
+        'Cédula', 'Primer Nombre', 'Segundo Nombre', 'Primer Apellido',
+        'Segundo Apellido', 'Teléfono', 'Correo', 'Dirección',
+        'Fecha Nacimiento', 'Estado Civil', 'Número de Hijos', 'Cargo',
+        'Código de Cargo', 'Categoría', 'Dependencia', 'Código de Dependencia',
+        'Título', 'Especialidad', 'Fecha Ingreso Ministerio',
+        'Fecha Ingreso Institución', 'Talla Zapato', 'Talla Camisa',
+        'Talla Pantalón', 'Detalle de Hijos',
+    ]
     ws.append(encabezados)
 
     for col_num in range(1, len(encabezados) + 1):
@@ -55,19 +64,75 @@ def generar_excel_personal(queryset) -> BytesIO:
         celda.font = _FUENTE_CABECERA
         celda.fill = _RELLENO_CABECERA
 
-    for p in queryset:
+    hijos_por_persona = {}
+    for p in personas:
         telefono = getattr(p, 'telefono', '') or (getattr(p.id_usuario, 'telefono', '') if p.id_usuario else '')
-        correo = getattr(p.id_usuario, 'email', '') or ''
+        correo = p.correo or (getattr(p.id_usuario, 'email', '') if p.id_usuario else '') or ''
+        direccion = getattr(p, 'direccion', '') or ''
+        hijos = list(p.hijos.all()) if hasattr(p, 'hijos') else []
+        hijos_por_persona[p.pk if hasattr(p, 'pk') else id(p)] = hijos
+        detalle_hijos = '; '.join(
+            f"{hijo.primer_nombre} {hijo.segundo_nombre or ''}".strip()
+            + f" ({hijo.edad} años)"
+            for hijo in hijos
+        )
         ws.append([
             p.cedula,
             p.primer_nombre,
+            p.segundo_nombre,
             p.primer_apellido,
-            p.categoria,
+            p.segundo_apellido,
             telefono or 'No registrado',
-            correo or 'No registrado',
+            correo,
+            direccion,
+            p.fecha_nacimiento or '',
+            p.estado_civil or '',
+            p.numero_hijos if p.numero_hijos is not None else '',
+            p.cargo or '',
+            p.codigo_cargo or '',
+            p.categoria or '',
+            p.dependencia or '',
+            p.codigo_dependencia or '',
+            p.titulo or '',
+            p.especialidad or '',
+            p.fecha_ingreso_ministerio or '',
+            p.fecha_ingreso_institucion or '',
+            p.talla_zapato or '',
+            p.talla_camisa or '',
+            p.talla_pantalon or '',
+            detalle_hijos,
         ])
 
     _ajustar_ancho_columnas(ws)
+
+    ws_hijos = wb.create_sheet("Hijos")
+    encabezados_hijos = [
+        'Cédula del Personal', 'Nombre del Personal', 'Primer Nombre del Hijo',
+        'Segundo Nombre del Hijo', 'Edad',
+    ]
+    ws_hijos.append(encabezados_hijos)
+    for celda in ws_hijos[1]:
+        celda.font = _FUENTE_CABECERA
+        celda.fill = _RELLENO_CABECERA
+
+    for p in personas:
+        nombre_personal = ' '.join(filter(None, [
+            p.primer_nombre,
+            p.segundo_nombre,
+            p.primer_apellido,
+            p.segundo_apellido,
+        ]))
+        hijos = hijos_por_persona[p.pk if hasattr(p, 'pk') else id(p)]
+        for hijo in hijos:
+            ws_hijos.append([
+                p.cedula,
+                nombre_personal,
+                hijo.primer_nombre,
+                hijo.segundo_nombre or '',
+                hijo.edad,
+            ])
+
+    _ajustar_ancho_columnas(ws_hijos)
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -75,14 +140,14 @@ def generar_excel_personal(queryset) -> BytesIO:
     return buffer
 
 
-def generar_pdf_personal(queryset, categoria=None) -> BytesIO:
+def generar_pdf_personal(queryset, cargo=None) -> BytesIO:
     """
     Listado de personal en PDF a partir del queryset recibido.
 
-    ``categoria`` (opcional) segmenta el título: "LISTADO DE PERSONAL — <CATEGORIA>".
+    ``cargo`` (opcional) segmenta el título: "LISTADO DE PERSONAL — <CARGO>".
     """
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=35, leftMargin=35, topMargin=40, bottomMargin=40)
     story = []
     styles = getSampleStyleSheet()
 
@@ -96,27 +161,28 @@ def generar_pdf_personal(queryset, categoria=None) -> BytesIO:
         alignment=1
     )
 
-    # Título segmentado por la categoría solicitada (si viene)
+    # Título segmentado por el cargo solicitado (si viene)
     titulo = "LISTADO DE PERSONAL"
-    if categoria:
-        titulo = f"LISTADO DE PERSONAL — {categoria.upper()}"
+    if cargo:
+        titulo = f"LISTADO DE PERSONAL — {cargo.upper()}"
 
     story.append(Paragraph(titulo, estilo_titulo))
     story.append(Spacer(1, 16))
 
-    datos_tabla = [['Cédula', 'Nombre', 'Categoría', 'Teléfono', 'Correo']]
+    datos_tabla = [['Cédula', 'Nombre', 'Cargo', 'Categoría', 'Teléfono', 'Correo']]
     for p in queryset:
         telefono = getattr(p, 'telefono', '') or (getattr(p.id_usuario, 'telefono', '') if p.id_usuario else '')
-        correo = getattr(p.id_usuario, 'email', '') or ''
+        correo = p.correo or (getattr(p.id_usuario, 'email', '') if p.id_usuario else '') or ''
         datos_tabla.append([
             p.cedula,
-            f"{p.primer_nombre} {p.primer_apellido}",
-            p.categoria,
+            f"{p.primer_nombre} {p.segundo_nombre or ''} {p.primer_apellido} {p.segundo_apellido or ''}".strip(),
+            p.cargo,
+            p.categoria or 'No registrada',
             telefono or 'No registrado',
             correo or 'No registrado',
         ])
 
-    tabla_pdf = Table(datos_tabla, colWidths=[90, 150, 140, 110, 110])
+    tabla_pdf = Table(datos_tabla, colWidths=[90, 170, 135, 95, 110, 150])
     tabla_pdf.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1F4E78')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),

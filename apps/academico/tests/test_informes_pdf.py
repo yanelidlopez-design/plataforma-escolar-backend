@@ -14,20 +14,25 @@ Cada línea con 'assert' incluye '# nosec B101' para mantener Bandit en 0 issues
 """
 
 from datetime import timedelta
+from io import BytesIO
 from uuid import uuid4
 
 import pytest
 from django.db import connection
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.academico.models import (
     Alumnos,
+    AprendizajeAlcanzado,
     CriterioEvaluacion,
+    CriterioPeriodo,
     EvaluacionLapsoCriterio,
     GruposAcademicos,
+    Inscripciones,
     PeriodoCalificacion,
 )
 from apps.core.models import (
@@ -49,6 +54,7 @@ MODELOS_LEGACY_COMPLETOS = [
     RepresentantesLegales,
     Alumnos,
     AlumnoRepresentante,
+    Inscripciones,
     PeriodosAcademicos,
     NivelesEducativos,
     Secciones,
@@ -73,6 +79,27 @@ def tablas_completas(transactional_db):
             if modelo._meta.db_table not in existentes:
                 schema_editor.create_model(modelo)
                 creadas.append(modelo)
+        if 'id_criterio' not in {
+            columna.name
+            for columna in connection.introspection.get_table_description(
+                connection.cursor(),
+                AprendizajeAlcanzado._meta.db_table,
+            )
+        }:
+            schema_editor.delete_model(AprendizajeAlcanzado)
+            schema_editor.execute('''
+                CREATE TABLE "aprendizaje_alcanzado" (
+                    "id" integer NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    "id_alumno" integer NOT NULL,
+                    "id_periodo" integer NOT NULL,
+                    "id_criterio" integer NULL,
+                    "texto" text NOT NULL,
+                    "sugerencias" text NULL,
+                    "indicador" varchar(2) NOT NULL DEFAULT '',
+                    "orden" integer NOT NULL DEFAULT 0,
+                    UNIQUE ("id_alumno", "id_periodo", "orden")
+                )
+            ''')
     yield
     # Teardown: eliminar tablas creadas para no contaminar otros tests
     # que usan SQL crudo con definiciones más permisivas (p. ej. orden NULL).
@@ -215,6 +242,125 @@ def test_generacion_pdf_exitoso_contenido_binario(api_client, usuario_admin, per
     assert response['Content-Type'] == 'application/pdf'  # nosec B101
     contenido = b''.join(response.streaming_content)  # nosec B101
     assert contenido[:4] == b'%PDF'  # nosec B101
+
+
+@pytest.mark.django_db
+def test_boleta_cualitativa_incluye_aprendizajes_guardados(api_client, usuario_admin, periodo_abierto, tablas_completas):
+    grupo = _crear_grupo('Educación Primaria', 'Segundo Grado')
+    alumno = _crear_alumno('Ana', 'V-12121212', 'CE-BOLETA-001')
+    criterio = _crear_criterio(grupo, 'Lengua', 'Lee textos cortos con fluidez.')
+    EvaluacionLapsoCriterio.objects.create(
+        alumno=alumno,
+        criterio=criterio,
+        periodo=periodo_abierto,
+        indicador='PL',
+        sugerencias='Continuar fortaleciendo la lectura.',
+    )
+    AprendizajeAlcanzado.objects.create(
+        alumno=alumno,
+        periodo=periodo_abierto,
+        texto='Lee y comprende textos breves de forma autónoma.',
+        indicador='PL',
+        orden=0,
+    )
+
+    api_client.force_authenticate(user=usuario_admin)
+    response = api_client.get(reverse(
+        'descarga_boleta_cualitativa',
+        kwargs={'alumno_id': alumno.pk, 'periodo_id': periodo_abierto.pk},
+    ))
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert response['Content-Type'] == 'application/pdf'  # nosec B101
+    contenido = b''.join(response.streaming_content)  # nosec B101
+    assert contenido[:4] == b'%PDF'  # nosec B101
+
+
+@pytest.mark.django_db
+def test_exportar_boleta_excel_conserva_plantilla_y_datos(api_client, usuario_admin, periodo_abierto, tablas_completas):
+    grupo = _crear_grupo('Educación Primaria', 'Segundo Grado')
+    alumno = _crear_alumno('Ana', 'V-13131313', 'CE-BOLETA-EXCEL-001')
+    criterio = _crear_criterio(grupo, 'Lengua', 'Lee textos cortos con fluidez.')
+    EvaluacionLapsoCriterio.objects.create(
+        alumno=alumno,
+        criterio=criterio,
+        periodo=periodo_abierto,
+        indicador='PL',
+        sugerencias='Continuar fortaleciendo la lectura.',
+    )
+    AprendizajeAlcanzado.objects.create(
+        alumno=alumno,
+        periodo=periodo_abierto,
+        criterio=criterio,
+        texto='Lee y comprende textos breves de forma autónoma.',
+        indicador='PL',
+        orden=0,
+    )
+
+    api_client.force_authenticate(user=usuario_admin)
+    response = api_client.get(reverse(
+        'descarga_boleta_cualitativa_excel',
+        kwargs={'alumno_id': alumno.pk, 'periodo_id': periodo_abierto.pk},
+    ))
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    assert response['Content-Type'] == 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'  # nosec B101
+    contenido = b''.join(response.streaming_content)  # nosec B101
+    hoja = load_workbook(BytesIO(contenido)).active
+    assert hoja['A12'].value.startswith('INFORME DESCRIPTIVO DE EDUCACIÓN PRIMARIA')  # nosec B101
+    assert 'Ana Estudiante' in hoja['A16'].value  # nosec B101
+    assert 'Lee y comprende textos breves' in hoja['A22'].value  # nosec B101
+    assert hoja['G22'].value == 'X'  # nosec B101
+    assert not any(
+        'Lee textos cortos con fluidez.' in str(celda.value)
+        or 'Criterios\n' in str(celda.value)
+        for fila in hoja.iter_rows()
+        for celda in fila
+    )  # nosec B101
+    merges_boleta = {str(rango) for rango in hoja.merged_cells.ranges}
+    assert 'A21:F25' not in merges_boleta  # nosec B101
+    assert 'G21:K25' not in merges_boleta  # nosec B101
+    assert hoja['A20'].value.startswith('P.A:')  # nosec B101
+    assert 'Continuar fortaleciendo la lectura.' in hoja['A40'].value  # nosec B101
+    assert len(hoja._images) == 1  # nosec B101
+
+
+@pytest.mark.django_db
+def test_sugerencia_se_puede_guardar_desde_calificaciones(api_client, usuario_admin, periodo_abierto, tablas_completas):
+    grupo = _crear_grupo('Educación Primaria', 'Segundo Grado')
+    alumno = _crear_alumno('Ana', 'V-14141414', 'CE-SUGERENCIA-001')
+    criterio = _crear_criterio(grupo, 'Lengua', 'Lee textos cortos con fluidez.')
+    CriterioPeriodo.objects.create(criterio=criterio, periodo=periodo_abierto)
+    Inscripciones.objects.create(
+        alumno=alumno,
+        grupo=grupo,
+        fecha_inscripcion=timezone.now(),
+        estado_inscripcion='Activa',
+    )
+    api_client.force_authenticate(user=usuario_admin)
+
+    response = api_client.post(reverse('evaluaciones_cualitativas_admin'), {
+        'id_periodo': periodo_abierto.pk,
+        'id_grado': grupo.grado_id,
+        'id_seccion': grupo.seccion_id,
+        'alumnos_evaluaciones': [{
+            'id_alumno': alumno.pk,
+            'evaluaciones': [{
+                'id_criterio': criterio.pk,
+                'indicador': '',
+                'sugerencias': 'Practicar lectura en voz alta.',
+            }],
+        }],
+    }, format='json')
+
+    assert response.status_code == status.HTTP_200_OK  # nosec B101
+    evaluacion = EvaluacionLapsoCriterio.objects.get(
+        alumno=alumno,
+        criterio=criterio,
+        periodo=periodo_abierto,
+    )
+    assert evaluacion.indicador == ''  # nosec B101
+    assert evaluacion.sugerencias == 'Practicar lectura en voz alta.'  # nosec B101
 
 
 # ---------------------------------------------------------------------------

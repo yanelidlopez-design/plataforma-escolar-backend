@@ -80,6 +80,8 @@ class Alumnos(models.Model):
     tipo_discapacidad = models.TextField(blank=True, null=True, db_column='tipo_discapacidad')
     observaciones = models.TextField(blank=True, null=True, db_column='observaciones')
     fecha_inscripcion_inicial = models.DateField(db_column='fecha_inscripcion_inicial')
+    fecha_egreso = models.DateField(blank=True, null=True, db_column='fecha_egreso')
+    repitiente = models.BooleanField(default=False, db_column='repitiente')
     estatus_general = models.CharField(max_length=50, db_column='estatus_general')
 
     class Meta:
@@ -346,6 +348,27 @@ class CriterioEvaluacion(models.Model):
         return f"{self.materia_nombre} - {self.descripcion_criterio[:50]}"
 
 
+class CriterioPeriodo(models.Model):
+    """Asocia un criterio de una sección con un lapso concreto."""
+
+    criterio = models.ForeignKey(
+        CriterioEvaluacion,
+        on_delete=models.CASCADE,
+        db_column='id_criterio',
+        related_name='periodos_configurados',
+    )
+    periodo = models.ForeignKey(
+        PeriodoCalificacion,
+        on_delete=models.CASCADE,
+        db_column='id_periodo',
+        related_name='criterios_configurados',
+    )
+
+    class Meta:
+        db_table = 'criterio_periodo'
+        unique_together = ('criterio', 'periodo')
+
+
 class EvaluacionLapsoCriterio(models.Model):
     """
     Resultado cualitativo por alumno, criterio y lapso.
@@ -399,6 +422,41 @@ class EvaluacionLapsoCriterio(models.Model):
             f"{self.alumno} - {self.criterio} - "
             f"Periodo {self.periodo.numero_periodo} ({self.get_indicador_display()})"
         )
+
+
+class AprendizajeAlcanzado(models.Model):
+    """Aprendizaje individual con indicador por alumno y lapso."""
+
+    INDICADOR_CHOICES = EvaluacionLapsoCriterio.INDICADOR_CHOICES
+
+    alumno = models.ForeignKey(Alumnos, on_delete=models.CASCADE, db_column='id_alumno')
+    periodo = models.ForeignKey(PeriodoCalificacion, on_delete=models.CASCADE, db_column='id_periodo')
+    criterio = models.ForeignKey(
+        CriterioEvaluacion,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        db_column='id_criterio',
+    )
+    texto = models.TextField(blank=True, default='', db_column='texto')
+    sugerencias = models.TextField(blank=True, null=True, db_column='sugerencias')
+    indicador = models.CharField(
+        max_length=2,
+        choices=INDICADOR_CHOICES,
+        blank=True,
+        default='',
+        db_column='indicador',
+    )
+    orden = models.PositiveIntegerField(default=0, db_column='orden')
+
+    class Meta:
+        db_table = 'aprendizaje_alcanzado'
+        unique_together = ('alumno', 'periodo', 'orden')
+        verbose_name = 'Aprendizaje Alcanzado'
+        verbose_name_plural = 'Aprendizajes Alcanzados'
+
+    def __str__(self):
+        return f"Aprendizajes de {self.alumno} - {self.periodo}"
 
 
 class ConstanciaProsecucionFinal(models.Model):

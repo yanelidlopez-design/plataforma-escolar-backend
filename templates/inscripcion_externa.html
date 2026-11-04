@@ -42,6 +42,18 @@
       accent-color: #0ea5e9;
       cursor: pointer;
     }
+    .check { display: flex; align-items: center; gap: 8px; min-height: 42px; }
+    .check input[type="checkbox"] {
+      -webkit-appearance: checkbox;
+      appearance: auto;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: none;
+      box-shadow: none;
+      accent-color: #0ea5e9;
+    }
+    .check label { margin: 0; font-size: 14px; }
     .opcional { color: #64748b; font-weight: 400; font-size: 12px; margin-left: 6px; }
     .btn-cancelar { width: 100%; margin-top: 8px; padding: 14px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; }
     .btn-cancelar:active { background: #e2e8f0; }
@@ -120,6 +132,10 @@
               <option value="Otro">Otro</option>
             </select>
           </div>
+        </div>
+        <div class="field check">
+          <input type="checkbox" name="repitiente" value="true" id="repitiente">
+          <label for="repitiente">El alumno es repitiente</label>
         </div>
         <div class="row">
           <div class="field">
@@ -550,6 +566,7 @@
           segundo_apellido: nuloSiVacio(d.get('segundo_apellido')),
           fecha_nacimiento: d.get('fecha_nacimiento'),
           genero: d.get('genero'),
+          repitiente: d.get('repitiente') === 'true',
           lugar_nacimiento: nuloSiVacio(d.get('lugar_nacimiento')),
           nacionalidad: nuloSiVacio(d.get('nacionalidad')),
           entidad_federal_nacimiento: nuloSiVacio(d.get('entidad_federal_nacimiento')),

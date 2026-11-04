@@ -1,8 +1,10 @@
 from django.utils.translation import gettext_lazy as _
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
+from rest_framework.authentication import BaseAuthentication
 
 from .models import Usuarios
+from apps.academico.models import PeriodoCalificacion
 
 
 class UsuariosJWTAuthentication(JWTAuthentication):
@@ -51,3 +53,72 @@ class UsuariosJWTAuthentication(JWTAuthentication):
                 _('Usuario no encontrado o inactivo.'),
                 code='user_not_found',
             )
+
+
+class TokenDocenteUser:
+    """
+    Usuario simulado autenticado mediante token temporal de carga de notas.
+    Tiene is_authenticated = True para superar permisos de IsAuthenticated en DRF.
+    """
+    is_authenticated = True
+    is_anonymous = False
+    is_active = True
+
+    def __init__(self, periodo):
+        self.token_periodo = periodo
+        self.username = f"docente_token_{periodo.pk}"
+        self.pk = None
+
+    def __str__(self):
+        return self.username
+
+
+class URLTokenAuthentication(BaseAuthentication):
+    """
+    Autenticación por token en parámetros de URL para formularios externos
+    de carga de notas.
+
+    Lee el token desde:
+      1. Query param `?token=...`
+      2. Cabecera `Authorization: Bearer <token>`
+
+    Valida el token contra `PeriodoCalificacion.token_acceso`.
+    """
+
+    def authenticate(self, request):
+        # Intento 1: query param ?token=... (funciona con request DRF o WSGIRequest)
+        query_dict = getattr(request, 'query_params', getattr(request, 'GET', {}))
+        token = query_dict.get('token')
+
+        # Intento 2: cabecera Authorization: Bearer <token>
+        if not token:
+            auth_header = getattr(request, 'headers', {}).get(
+                'Authorization', request.META.get('HTTP_AUTHORIZATION', '')
+            )
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(' ', 1)[1].strip()
+
+        if not token:
+            return None
+
+        # Validar contra PeriodoCalificacion
+        try:
+            periodo = PeriodoCalificacion.objects.get(
+                token_acceso=token,
+                activo_manual=True,
+            )
+        except PeriodoCalificacion.DoesNotExist:
+            raise AuthenticationFailed(
+                _('Token de acceso inválido o expirado.'),
+                code='invalid_token',
+            )
+
+        if not periodo.esta_abierto():
+            raise AuthenticationFailed(
+                _('El periodo de calificación está cerrado.'),
+                code='periodo_cerrado',
+            )
+
+        # Crear un usuario autenticado por token con is_authenticated = True
+        user = TokenDocenteUser(periodo)
+        return (user, token)

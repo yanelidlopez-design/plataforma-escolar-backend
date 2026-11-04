@@ -4,11 +4,10 @@ class Profesores(models.Model):
     """
     Personal del plantel (renombrado conceptualmente de 'Profesores' a 'Personal').
 
-    La tabla legacy `profesores` no tiene columna `categoria`: el campo se almacena
-    en la columna existente `especialidad` (db_column) para no alterar la BD.
+    La tabla legacy `profesores` almacena los datos del personal.
+    El campo `cargo` reemplaza al antiguo `categoria`.
     """
-    CATEGORIA_CHOICES = [
-        # Valor legacy ya presente en la tabla 'profesores' (debe poder editarse)
+    CARGO_CHOICES = [
         ('Integral', 'Integral'),
         ('Profesor', 'Profesor'),
         ('Obrero', 'Obrero'),
@@ -21,9 +20,9 @@ class Profesores(models.Model):
 
     id_profesor = models.AutoField(primary_key=True, db_column='id_profesor')
     id_usuario = models.OneToOneField(
-        'core.Usuarios',  # Asegúrate de cambiar 'core' por el nombre real de la app donde vive Usuarios si es distinta
+        'core.Usuarios',
         on_delete=models.CASCADE,
-        db_column='id_usuario',  # <- Corregido: debe apuntar a la columna id_usuario
+        db_column='id_usuario',
         blank=True,
         null=True
     )
@@ -33,8 +32,25 @@ class Profesores(models.Model):
     segundo_apellido = models.CharField(max_length=100, blank=True, null=True, db_column='segundo_apellido')
     cedula = models.CharField(max_length=20, unique=True, db_column='cedula')
     telefono = models.CharField(max_length=20, blank=True, null=True, db_column='telefono')
-    # Campo obligatorio (Choice/Enum) — se persiste en la columna legacy 'especialidad'
-    categoria = models.CharField(max_length=150, choices=CATEGORIA_CHOICES, db_column='especialidad')
+    # Campo de cargo (antes categoria) — se persiste en la columna legacy 'especialidad'
+    cargo = models.CharField(max_length=150, choices=CARGO_CHOICES, db_column='especialidad')
+    codigo_cargo = models.CharField(max_length=50, blank=True, null=True, db_column='codigo_cargo')
+    categoria = models.CharField(max_length=50, blank=True, null=True, db_column='categoria')
+    # Datos personales ampliados
+    fecha_nacimiento = models.DateField(blank=True, null=True, db_column='fecha_nacimiento')
+    talla_zapato = models.CharField(max_length=20, blank=True, null=True, db_column='talla_zapato')
+    talla_camisa = models.CharField(max_length=20, blank=True, null=True, db_column='talla_camisa')
+    talla_pantalon = models.CharField(max_length=20, blank=True, null=True, db_column='talla_pantalon')
+    estado_civil = models.CharField(max_length=50, blank=True, null=True, db_column='estado_civil')
+    numero_hijos = models.PositiveIntegerField(blank=True, null=True, db_column='numero_hijos')
+    dependencia = models.CharField(max_length=150, blank=True, null=True, db_column='dependencia')
+    codigo_dependencia = models.CharField(max_length=50, blank=True, null=True, db_column='codigo_dependencia')
+    titulo = models.CharField(max_length=200, blank=True, null=True, db_column='titulo')
+    especialidad = models.CharField(max_length=200, blank=True, null=True, db_column='especialidad_campo')
+    fecha_ingreso_ministerio = models.DateField(blank=True, null=True, db_column='fecha_ingreso_ministerio')
+    fecha_ingreso_institucion = models.DateField(blank=True, null=True, db_column='fecha_ingreso_institucion')
+    correo = models.CharField(max_length=200, blank=True, null=True, db_column='correo')
+    direccion = models.TextField(blank=True, null=True, db_column='direccion')
 
     class Meta:
         managed = False
@@ -42,8 +58,57 @@ class Profesores(models.Model):
         verbose_name = 'Personal'
         verbose_name_plural = 'Personal'
 
+    @property
+    def edad(self):
+        """Calcula la edad a partir de la fecha de nacimiento."""
+        if self.fecha_nacimiento:
+            from django.utils import timezone
+            today = timezone.now().date()
+            return today.year - self.fecha_nacimiento.year - (
+                (today.month, today.day) < (self.fecha_nacimiento.month, self.fecha_nacimiento.day)
+            )
+        return None
+
+    @property
+    def tiempo_servicio(self):
+        """Calcula el tiempo de servicio en años a partir de la fecha de ingreso a la institución."""
+        if self.fecha_ingreso_institucion:
+            from django.utils import timezone
+            today = timezone.now().date()
+            return today.year - self.fecha_ingreso_institucion.year - (
+                (today.month, today.day) < (self.fecha_ingreso_institucion.month, self.fecha_ingreso_institucion.day)
+            )
+        return None
+
     def __str__(self):
-        return f"{self.primer_nombre} {self.primer_apellido} - {self.categoria}"
+        return f"{self.primer_nombre} {self.primer_apellido} - {self.cargo}"
+
+
+class HijosPersonal(models.Model):
+    id_hijo = models.AutoField(primary_key=True, db_column='id_hijo')
+    personal = models.ForeignKey(
+        Profesores,
+        on_delete=models.CASCADE,
+        db_column='id_profesor',
+        related_name='hijos',
+        db_constraint=False,
+    )
+    primer_nombre = models.CharField(max_length=100, db_column='primer_nombre')
+    segundo_nombre = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        db_column='segundo_nombre',
+    )
+    edad = models.PositiveSmallIntegerField(db_column='edad')
+
+    class Meta:
+        db_table = 'hijos_personal'
+        verbose_name = 'Hijo de personal'
+        verbose_name_plural = 'Hijos del personal'
+
+    def __str__(self):
+        return f"{self.primer_nombre} {self.segundo_nombre or ''}".strip()
 
 
 class RepresentantesLegales(models.Model):

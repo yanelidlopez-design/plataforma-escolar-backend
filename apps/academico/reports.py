@@ -75,14 +75,30 @@ ALUMNOS_EXPORT_ENCABEZADOS = [
     'N° Cuenta',
     'Tipo Cuenta',
     'Banco',
+    'Entidad Federal Nacimiento',
+    'Municipio Nacimiento',
+    'Parroquia Nacimiento',
+    'Apoyo Escolar',
+    'Vacunas Completas',
+    'Estado Civil Padres',
+    'Ingreso Familiar',
+    'Profesión Madre',
+    'Profesión Padre',
+    'Tipo Vivienda',
+    'Número Hermanos',
+    'Número en Plantel',
+    'Observaciones',
+    'Fecha Egreso',
+    'Repitiente',
+    'Parentesco Representante',
+    'Correo Representante',
 ]
 
 ALUMNOS_PDF_COLUMNAS = [
-    'Cédula Escolar', 'Tipo Doc.', 'N° Doc.', 'Primer Nombre', 'Segundo Nombre',
-    'Primer Apellido', 'Segundo Apellido', 'Género', 'Fecha Nac.', 'Lugar Nac.',
-    'Nacionalidad', 'Grupo Sanguíneo', 'Peso', 'Talla', 'Grado', 'Sección',
-    'Estado Inscripción', 'Profesor Encargado'
+    'Cédula Escolar', 'Documento', 'Alumno', 'Género', 'Fecha Nacimiento',
+    'Grado', 'Sección', 'Estado Inscripción', 'Representante', 'Teléfono Rep.'
 ]
+ALUMNOS_CSV_ENCABEZADOS = ALUMNOS_PDF_COLUMNAS
 
 
 # ============================================================================
@@ -270,32 +286,47 @@ def _fila_alumno(alumno):
         alumno.numero_cuenta or 'N/D',
         alumno.tipo_cuenta or 'N/D',
         alumno.banco or 'N/D',
+        alumno.entidad_federal_nacimiento or 'N/D',
+        alumno.municipio_nacimiento or 'N/D',
+        alumno.parroquia_nacimiento or 'N/D',
+        'Sí' if alumno.apoyo_escolar else 'No',
+        'Sí' if alumno.vacunas_completas else 'No',
+        alumno.estado_civil_padres or 'N/D',
+        alumno.ingreso_familiar or 'N/D',
+        alumno.profesion_madre or 'N/D',
+        alumno.profesion_padre or 'N/D',
+        alumno.tipo_vivienda or 'N/D',
+        alumno.numero_hermanos if alumno.numero_hermanos is not None else 'N/D',
+        alumno.numero_en_el_planter if alumno.numero_en_el_planter is not None else 'N/D',
+        alumno.observaciones or 'N/D',
+        alumno.fecha_egreso or 'N/D',
+        'Sí' if alumno.repitiente else 'No',
+        relacion.parentesco if relacion and relacion.parentesco else 'N/D',
+        representante.email if representante and representante.email else 'N/D',
     ]
 
 
 def _fila_alumno_pdf(alumno):
-    """Genera una fila de datos simplificada para exportación PDF de alumnos."""
+    """Genera los datos principales para exportación PDF/CSV de alumnos."""
     inscripcion = _inscripcion_referencia_alumno(alumno)
     grupo = inscripcion.grupo if inscripcion else None
+    relacion = _primera_relacion(alumno, 'representantes_vinculados')
+    representante = relacion.representante if relacion else None
+    documento = ' '.join(filter(None, [
+        alumno.tipo_documento_identidad,
+        alumno.numero_documento_identidad,
+    ]))
     return [
         alumno.cedula_escolar or 'N/D',
-        alumno.tipo_documento_identidad or 'V',
-        alumno.numero_documento_identidad or 'N/D',
-        alumno.primer_nombre or 'N/D',
-        alumno.segundo_nombre or 'N/D',
-        alumno.primer_apellido or 'N/D',
-        alumno.segundo_apellido or 'N/D',
+        documento or 'N/D',
+        _obtener_nombre_y_apellido(alumno),
         alumno.genero or 'N/D',
         alumno.fecha_nacimiento or 'N/D',
-        alumno.lugar_nacimiento or 'N/D',
-        alumno.nacionalidad or 'N/D',
-        alumno.grupo_sanguineo or 'N/D',
-        alumno.peso_kg or 'N/D',
-        alumno.talla_cm or 'N/D',
         grupo.grado.nombre_grado if grupo and grupo.grado else 'N/D',
         grupo.seccion.nombre_seccion if grupo and grupo.seccion else 'N/D',
         inscripcion.estado_inscripcion if inscripcion else 'N/D',
-        _obtener_nombre_y_apellido(alumno.id_profesor_encargado) if alumno.id_profesor_encargado else 'N/D',
+        _obtener_nombre_y_apellido(representante) if representante else 'N/D',
+        representante.telefono_principal if representante and representante.telefono_principal else 'N/D',
     ]
 
 
@@ -343,7 +374,7 @@ def exportar_alumnos_pdf(queryset, grado_id=None, seccion_id=None, estado=None):
     response['Content-Disposition'] = 'attachment; filename="alumnos.pdf"'
 
     doc = SimpleDocTemplate(
-        response, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+        response, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=35, bottomMargin=35
     )
     story = []
 
@@ -367,7 +398,7 @@ def exportar_alumnos_pdf(queryset, grado_id=None, seccion_id=None, estado=None):
         spaceAfter=6
     )
 
-    story.append(Paragraph("PLATAFORMA ESCOLAR - CONTROL DE INSCRIPCIONES", estilo_titulo))
+    story.append(Paragraph("PLATAFORMA ESCOLAR - LISTADO DE ALUMNOS", estilo_titulo))
     story.append(Spacer(1, 20))
 
     filas_filtro = []
@@ -393,8 +424,8 @@ def exportar_alumnos_pdf(queryset, grado_id=None, seccion_id=None, estado=None):
         story.append(Spacer(1, 12))
 
     encabezados = ALUMNOS_PDF_COLUMNAS
-    ancho_util = letter[0] - 80
-    pesos = [55, 35, 50, 100, 45, 32, 50, 30, 45, 100, 42, 90]
+    ancho_util = landscape(letter)[0] - 60
+    pesos = [1.1, 1, 1.8, 0.8, 1, 1, 0.7, 1, 1.6, 1]
     total_peso = sum(pesos)
     col_widths = [round(p * ancho_util / total_peso) for p in pesos]
     estilo_cab = ParagraphStyle(
@@ -409,7 +440,7 @@ def exportar_alumnos_pdf(queryset, grado_id=None, seccion_id=None, estado=None):
     datos_tabla = [[Paragraph(escape(h), estilo_cab) for h in encabezados]]
     for alumno in queryset:
         datos_tabla.append([
-            Paragraph(_texto_seguro(valor, 'N/D'), estilo_celda)
+            Paragraph(escape(_texto_seguro(valor, 'N/D')), estilo_celda)
             for valor in _fila_alumno_pdf(alumno)
         ])
 
@@ -445,10 +476,10 @@ def exportar_alumnos_csv(queryset):
     response.write('\ufeff')  # BOM UTF-8 para que Excel lo abra con acentos correctos
 
     writer = csv.writer(response)
-    writer.writerow(ALUMNOS_EXPORT_ENCABEZADOS)
+    writer.writerow(ALUMNOS_CSV_ENCABEZADOS)
 
     for alumno in queryset:
-        writer.writerow(_fila_alumno(alumno))
+        writer.writerow(_fila_alumno_pdf(alumno))
 
     return response
 
@@ -1166,28 +1197,35 @@ def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
     # ---------- DATOS DEL DIRECTOR/A (ConfiguracionPlantel -> Profesores) ----------
     director_nombre = '_______________________'
     director_cedula = 'V.-__________'
+    nombre_plantel = 'E.B Creación San José'
+    municipio_plantel = 'Francisco de Miranda'
+    parroquia_plantel = 'Calabozo'
+    centro_estadal = '_______________________'
     try:
         configuracion = ConfiguracionPlantel.objects.first()
-        if configuracion and configuracion.id_director_actual:
-            profesor_director = Profesores.objects.filter(
-                pk=configuracion.id_director_actual
-            ).first()
-            if profesor_director:
-                nombre_director = ' '.join(filter(None, [
-                    profesor_director.primer_nombre,
-                    profesor_director.segundo_nombre,
-                    profesor_director.primer_apellido,
-                    profesor_director.segundo_apellido,
-                ])).strip()
-                if nombre_director:
-                    director_nombre = nombre_director
-                cedula_director = (profesor_director.cedula or '').strip()
-                if cedula_director:
-                    if '-' in cedula_director:
-                        tipo_doc, numero_doc = cedula_director.split('-', 1)
-                        director_cedula = f'{tipo_doc.strip()}.-{numero_doc.strip()}'
-                    else:
-                        director_cedula = f'V.-{cedula_director}'
+        if configuracion:
+            nombre_plantel = configuracion.nombre_plantel or nombre_plantel
+            centro_estadal = configuracion.codigo_estadistico or centro_estadal
+            if configuracion.id_director_actual:
+                profesor_director = Profesores.objects.filter(
+                    pk=configuracion.id_director_actual
+                ).first()
+                if profesor_director:
+                    nombre_director = ' '.join(filter(None, [
+                        profesor_director.primer_nombre,
+                        profesor_director.segundo_nombre,
+                        profesor_director.primer_apellido,
+                        profesor_director.segundo_apellido,
+                    ])).strip()
+                    if nombre_director:
+                        director_nombre = nombre_director
+                    cedula_director = (profesor_director.cedula or '').strip()
+                    if cedula_director:
+                        if '-' in cedula_director:
+                            tipo_doc, numero_doc = cedula_director.split('-', 1)
+                            director_cedula = f'{tipo_doc.strip()}.-{numero_doc.strip()}'
+                        else:
+                            director_cedula = f'V.-{cedula_director}'
     except Exception:  # nosec B101
         logger.debug('Error resolviendo director del plantel para la constancia', exc_info=True)
 
@@ -1204,6 +1242,7 @@ def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
         or alumno_objeto.numero_documento_identidad
         or '__________'
     )
+    documento_alumno = escape(alumno_objeto.numero_documento_identidad or '__________')
     municipio_alumno = escape(
         alumno_objeto.municipio_nacimiento
         or alumno_objeto.lugar_nacimiento
@@ -1250,11 +1289,13 @@ def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
     cuerpo_texto = (
         f'Quien suscribe <b>{escape(director_nombre)}</b>, titular de la Cédula de '
         f'Identidad N° {escape(director_cedula)}, Director(a) de la Institución '
-        'Educativa E.B Creación San José, ubicada en el Municipio Francisco de '
-        'Miranda de la Parroquia Calabozo adscrita al Centro de Desarrollo de la '
-        'Calidad Educativa Estadal... <br/><br/>'
-        f'Hace constar que el (la) estudiante <b>{nombre_alumno}</b>, titular de la '
-        f'Cédula Escolar/C.I. N° {cedula_alumno}, nacido (a) en el Municipio '
+        f'Educativa <b>{escape(nombre_plantel)}</b>, ubicada en el Municipio '
+        f'{escape(municipio_plantel)} de la Parroquia {escape(parroquia_plantel)}, '
+        'adscrita al Centro de Desarrollo de la Calidad Educativa Estadal '
+        f'{escape(centro_estadal)}. Por la presente hace constar que el (la) '
+        f'estudiante <b>{nombre_alumno}</b>, titular de la Cédula Escolar N° '
+        f'{cedula_alumno}, Cédula de Identidad N° o Pasaporte N° {documento_alumno}, '
+        'nacido (a) en el Municipio '
         f'{municipio_alumno} del Estado {estado_alumno}, en fecha '
         f'{fecha_nacimiento_texto}, cursó el {grado_cursado_frase}, '
         f'correspondiéndole el literal <b>{literal_final}</b> durante el periodo '
@@ -1275,27 +1316,24 @@ def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
 
     # ---------- CUADRO DE FIRMAS PARALELAS (3 COLUMNAS) ----------
     celda_institucion = Paragraph(
-        '<b>INSTITUCIÓN EDUCATIVA</b><br/>'
-        '________________________________<br/>'
-        f'{escape(director_nombre)}<br/>'
-        f'N° C.I. {escape(director_cedula)}<br/>'
+        '<b>INSTITUCIÓN EDUCATIVA<br/>DIRECTOR(A)</b><br/><br/>'
+        f'Nombre y Apellido: {escape(director_nombre)}<br/>'
+        f'Número de C.I.: {escape(director_cedula)}<br/><br/>'
         'Firma y Sello',
         estilo_firma,
     )
-    celda_sello = Paragraph('Sello Húmedo<br/><br/><br/>', estilo_firma)
     celda_cdcee = Paragraph(
         '<b>CENTRO DE DESARROLLO DE LA CALIDAD<br/>'
-        'EDUCATIVA ESTADAL</b><br/>'
-        '________________________________<br/>'
-        'Nombre y Apellido:<br/>'
-        'N° C.I.:<br/>'
+        'EDUCATIVA ESTADAL<br/>DIRECTOR(A)</b><br/><br/>'
+        'Nombre y Apellido: _______________________<br/>'
+        'Número de C.I.: _______________________<br/><br/>'
         'Firma y Sello',
         estilo_firma,
     )
 
     tabla_firmas = Table(
-        [[celda_institucion, celda_sello, celda_cdcee]],
-        colWidths=[6.5 * cm, 3 * cm, 6.5 * cm],
+        [[celda_institucion, celda_cdcee]],
+        colWidths=[8 * cm, 8 * cm],
     )
     tabla_firmas.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1308,6 +1346,333 @@ def generar_pdf_constancia_prosecucion(alumno_objeto, constancia_objeto):
         ('LINEABOVE', (2, 0), (2, 0), 0.8, colors.black),
     ]))
     story.append(tabla_firmas)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+# ============================================================================
+# SERVICIO C: PDF DE BOLETA CUALITATIVA (INFORME DESCRIPTIVO)
+# ============================================================================
+
+def generar_pdf_boleta_cualitativa(
+    alumno,
+    periodo,
+    evaluaciones,
+    datos_grupo=None,
+    aprendizajes_alcanzados='',
+):
+    """
+    Genera la Boleta Cualitativa (Informe Descriptivo) en PDF en memoria
+    con el formato especificado en el Excel.
+
+    Args:
+        alumno: instancia de ``Alumnos``.
+        periodo: instancia de ``PeriodoCalificacion``.
+        evaluaciones: queryset de ``EvaluacionLapsoCriterio`` para el alumno y periodo.
+        datos_grupo: dict opcional con datos del grupo (grado, seccion, docente, PA).
+
+    El documento incluye:
+      - Membrete institucional
+      - Título: "INFORME DESCRIPTIVO DE EDUCACIÓN PRIMARIA"
+      - Periodo y año escolar
+      - Datos del estudiante (nombre, grado, sección, edad, fecha de nacimiento,
+        cédula, representante, docente, P.A.)
+            - Aprendizajes alcanzados capturados por el docente
+            - Criterios del Área Personal con los 5 indicadores (PL, L, PM, EP, I)
+      - Campo de sugerencias
+      - Leyenda de indicadores
+      - Firma (docente, sello, fecha de entrega)
+
+    Retorna un ``io.BytesIO`` posicionado al inicio con el PDF listo para servir.
+    """
+    import io
+    from django.utils import timezone
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+    )
+
+    # Nombres de los lapsos
+    NOMBRES_LAPSOS = {
+        1: 'PRIMER LAPSO PEDAGÓGICO',
+        2: 'SEGUNDO LAPSO PEDAGÓGICO',
+        3: 'TERCER LAPSO PEDAGÓGICO',
+    }
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+    )
+
+    story = []
+    styles = getSampleStyleSheet()
+
+    # Estilo para el membrete
+    estilo_membrete = ParagraphStyle(
+        'Membrete',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        alignment=TA_CENTER,
+        leading=12,
+    )
+
+    # Estilo para títulos
+    estilo_titulo = ParagraphStyle(
+        'Titulo',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        alignment=TA_CENTER,
+        spaceAfter=12,
+    )
+
+    # Estilo para subtítulos
+    estilo_subtitulo = ParagraphStyle(
+        'Subtitulo',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=12,
+        alignment=TA_CENTER,
+        spaceAfter=6,
+    )
+
+    # Estilo para etiquetas
+    estilo_etiqueta = ParagraphStyle(
+        'Etiqueta',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=10,
+        alignment=TA_LEFT,
+    )
+
+    # Estilo para texto normal
+    estilo_normal = ParagraphStyle(
+        'Normal',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        alignment=TA_LEFT,
+    )
+
+    # Membrete institucional
+    membrete = (
+        'República Bolivariana De Venezuela<br/>'
+        'Ministerio Del Poder Popular Para La Educación<br/>'
+        'E.B Creación San José<br/>'
+        'Dirección: Urb. San José Obrero, Sector I Calle 1 Manzana A-12<br/>'
+        'Correo: Uensanjose4@Gmail.Com<br/>'
+        'Cod. DEA OD12431208<br/>'
+        'Calabozo-El Calvario'
+    )
+    story.append(Paragraph(membrete, estilo_membrete))
+    story.append(Spacer(1, 0.8 * cm))
+
+    # Título y periodo
+    nombre_lapso = NOMBRES_LAPSOS.get(periodo.numero_periodo, f'LAPSO {periodo.numero_periodo}')
+    año_actual = timezone.now().year
+    año_escolar = (datos_grupo or {}).get('periodo_escolar') or f'{año_actual}-{año_actual + 1}'
+    titulo = (
+        f'INFORME DESCRIPTIVO DE EDUCACIÓN PRIMARIA<br/>'
+        f'{nombre_lapso}<br/>AÑO ESCOLAR: {escape(str(año_escolar))}'
+    )
+    story.append(Paragraph(titulo, estilo_titulo))
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Datos del estudiante
+    # Calcular edad
+    edad = None
+    if alumno.fecha_nacimiento:
+        today = timezone.now().date()
+        birth_date = alumno.fecha_nacimiento
+        edad = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+
+    # Obtener representante principal
+    representante_nombre = ''
+    rep_vinculado = alumno.representantes_vinculados.filter(es_principal=True).first()
+    if rep_vinculado and rep_vinculado.representante:
+        rep = rep_vinculado.representante
+        representante_nombre = f"{rep.primer_nombre} {rep.primer_apellido}".strip()
+
+    # Obtener datos del grupo
+    grado = datos_grupo.get('grado', '') if datos_grupo else ''
+    seccion = datos_grupo.get('seccion', '') if datos_grupo else ''
+    docente = datos_grupo.get('docente', '') if datos_grupo else ''
+    proyecto_aprendizaje = datos_grupo.get('proyecto_aprendizaje', '') if datos_grupo else ''
+
+    # Tabla de datos del estudiante
+    cedula = alumno.cedula_escolar or alumno.numero_documento_identidad or ''
+    fecha_nac = alumno.fecha_nacimiento.strftime('%d/%m/%Y') if alumno.fecha_nacimiento else ''
+
+    datos_estudiante = [
+        ['ESTUDIANTE:', f'{alumno.primer_nombre} {alumno.segundo_nombre or ""} {alumno.primer_apellido} {alumno.segundo_apellido or ""}'.strip(), 'C.E./C.I:', cedula],
+        ['Grado:', grado, 'Sección:', seccion],
+        ['Edad:', str(edad) if edad is not None else '', 'Fecha de Nacimiento:', fecha_nac],
+        ['Representante:', representante_nombre, '', ''],
+        ['Docente del Grado:', docente, '', ''],
+        ['P.A:', proyecto_aprendizaje, '', ''],
+    ]
+
+    tabla_datos = Table(datos_estudiante, colWidths=[2.8 * cm, 6.7 * cm, 2.7 * cm, 6.3 * cm])
+    tabla_datos.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#89939B')),
+        ('SPAN', (1, 3), (3, 3)),
+        ('SPAN', (1, 4), (3, 4)),
+        ('SPAN', (1, 5), (3, 5)),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(tabla_datos)
+    story.append(Spacer(1, 0.3 * cm))
+
+    # Área Personal
+    story.append(Paragraph('Área Personal:', estilo_etiqueta))
+    story.append(Spacer(1, 0.2 * cm))
+
+    criterios_lista = list(evaluaciones)
+    criterios_header = [
+        'Aprendizajes Alcanzados:', 'Criterios', 'PL', 'L', 'PM', 'EP', 'I',
+    ]
+    criterios_data = [criterios_header]
+    for eval_ in criterios_lista:
+        criterio_nombre = eval_.criterio.descripcion_criterio if eval_.criterio else ''
+        indicador = eval_.indicador or ''
+        indicadores = ['X' if indicador == opcion else '' for opcion in ('PL', 'L', 'PM', 'EP', 'I')]
+        criterios_data.append(['', criterio_nombre, *indicadores])
+
+    if not criterios_lista:
+        criterios_data.append(['', 'Sin criterios registrados', '', '', '', '', ''])
+
+    if isinstance(aprendizajes_alcanzados, str):
+        aprendizajes_alcanzados = [{'texto': aprendizajes_alcanzados, 'indicador': ''}]
+    filas_aprendizaje = [
+        {
+            'texto': item.get('texto') or '',
+            'criterio': item.get('criterio_nombre') or '',
+            'indicador': item.get('indicador') or '',
+        }
+        for item in (aprendizajes_alcanzados or [])
+    ]
+    if not filas_aprendizaje:
+        filas_aprendizaje = [
+            {
+                'texto': '',
+                'criterio': eval_.criterio.descripcion_criterio if eval_.criterio else '',
+                'indicador': eval_.indicador or '',
+            }
+            for eval_ in criterios_lista
+        ]
+    if not filas_aprendizaje:
+        filas_aprendizaje = [{'texto': 'Sin aprendizajes registrados.', 'criterio': '', 'indicador': ''}]
+
+    criterios_data = [criterios_data[0]]
+    for aprendizaje in filas_aprendizaje:
+        indicadores = [
+            'X' if aprendizaje['indicador'] == opcion else ''
+            for opcion in ('PL', 'L', 'PM', 'EP', 'I')
+        ]
+        criterios_data.append([
+            Paragraph(escape(aprendizaje['texto']).replace('\n', '<br/>'), estilo_normal),
+            Paragraph(escape(aprendizaje['criterio']), estilo_normal),
+            *indicadores,
+        ])
+    criterios_data[0] = [
+        Paragraph('Aprendizajes Alcanzados:', estilo_etiqueta),
+        Paragraph('Criterios', estilo_etiqueta),
+        *[Paragraph(opcion, estilo_etiqueta) for opcion in ('PL', 'L', 'PM', 'EP', 'I')],
+    ]
+    for fila in criterios_data[1:]:
+        fila[1] = Paragraph(escape(str(fila[1])), estilo_normal)
+
+    tabla_criterios = Table(
+        criterios_data,
+        colWidths=[7.5 * cm, 6.5 * cm, 0.9 * cm, 0.9 * cm, 0.9 * cm, 0.9 * cm, 0.9 * cm],
+        repeatRows=1,
+    )
+    tabla_criterios.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#D9EAF3')),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('ROWBACKGROUNDS', (1, 1), (-1, -1), [colors.white, colors.HexColor('#F5F7F8')]),
+        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ]))
+    story.append(tabla_criterios)
+    story.append(Spacer(1, 0.3 * cm))
+
+    # Sugerencias permanecen separadas de los aprendizajes alcanzados.
+    sugerencias = list(dict.fromkeys(
+        [
+            (item.get('sugerencias') or '').strip()
+            for item in (aprendizajes_alcanzados or [])
+            if isinstance(item, dict) and (item.get('sugerencias') or '').strip()
+        ] + [
+        eval_.sugerencias.strip()
+        for eval_ in criterios_lista
+        if eval_.sugerencias and eval_.sugerencias.strip()
+        ]
+    ))
+    story.append(Paragraph('Sugerencias :', estilo_etiqueta))
+    story.append(Spacer(1, 0.2 * cm))
+    story.append(Paragraph(
+        '<br/>'.join(escape(sugerencia) for sugerencia in sugerencias) or '—',
+        estilo_normal,
+    ))
+    story.append(Spacer(1, 0.2 * cm))
+
+    # Leyenda de criterios
+    leyenda = """Criterios: PL: Plenamente Logrado         L: Logrado          PM: Por Mejorar          EP: En Proceso             I: Iniciado"""
+    story.append(Paragraph(leyenda, estilo_normal))
+    story.append(Spacer(1, 1 * cm))
+
+    # Firma
+    firma_data = [
+        ['Docente del Grado:', docente, '', 'Directora', '', ''],
+        ['', '', '', '', '', ''],
+        ['', '', '', '', '', ''],
+        ['sello', '', '', '', '', ''],
+        ['', '', '', '', '', ''],
+        ['', '', '', '', '', ''],
+        ['Fecha de entrega:', timezone.now().strftime('%d/%m/%Y'), '', '', '', ''],
+    ]
+
+    tabla_firma = Table(firma_data, colWidths=[3 * cm, 3 * cm, 1 * cm, 3 * cm, 1 * cm, 3 * cm])
+    tabla_firma.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 6), (0, 6), 'Helvetica-Bold'),
+        ('FONTNAME', (3, 0), (3, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (3, 0), (3, 0), 'CENTER'),
+        ('LINEABOVE', (0, 0), (0, 0), 0.5, colors.black),
+        ('LINEABOVE', (3, 0), (3, 0), 0.5, colors.black),
+    ]))
+    story.append(tabla_firma)
 
     doc.build(story)
     buffer.seek(0)

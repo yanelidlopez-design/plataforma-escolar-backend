@@ -24,8 +24,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from django.db.models import Count, Q, QuerySet
+from django.utils import timezone
 
 from ..models import Asistencias
+from apps.personal.models import Profesores
 
 
 class AsistenciasService:
@@ -132,3 +134,41 @@ class AsistenciasService:
             return True
         except (TypeError, ValueError):
             return False
+
+    @staticmethod
+    def obtener_profesor_desde_usuario(user) -> Profesores | None:
+        """
+        Resuelve el objeto ``Profesores`` vinculado al usuario autenticado.
+
+        El usuario se autentica vía JWT contra ``core.Usuarios`` (nombre_usuario).
+        El modelo ``Profesores`` tiene ``id_usuario`` (OneToOne a ``core.Usuarios``),
+        por lo que navegamos: user -> Usuarios (por nombre_usuario) -> Profesores
+        (por id_usuario).
+
+        Returns:
+            Instancia de Profesores o None si no se encuentra.
+        """
+        if user is None or not getattr(user, 'is_authenticated', False):
+            return None
+
+        username = getattr(user, 'username', None) or getattr(user, 'nombre_usuario', None)
+        if not username:
+            return None
+
+        try:
+            from apps.core.models import Usuarios
+            registro_usuario = Usuarios.objects.filter(
+                nombre_usuario=username,
+                activo=True,
+            ).only('id_usuario').first()
+
+            if registro_usuario is None:
+                return None
+
+            profesor = Profesores.objects.filter(
+                id_usuario_id=registro_usuario.id_usuario,
+            ).only('id_profesor', 'primer_nombre', 'primer_apellido', 'cedula').first()
+
+            return profesor
+        except Exception:
+            return None

@@ -22,7 +22,7 @@ from django.utils.crypto import get_random_string
 
 from apps.core.models import Usuarios
 
-from ..models import Profesores
+from ..models import HijosPersonal, Profesores
 
 
 class PersonalService:
@@ -48,22 +48,25 @@ class PersonalService:
         creación del Usuario y el ``serializer.save()``.
         """
         data = dict(validated_data)
+        hijos = data.pop('hijos', [])
         id_usuario = data.pop('id_usuario', None)
 
         if id_usuario:
             # El payload trae el vínculo: solo se persiste el Profesor.
-            return Profesores.objects.create(**data, id_usuario=id_usuario)
+            personal = Profesores.objects.create(**data, id_usuario=id_usuario)
+            PersonalService._guardar_hijos(personal, hijos)
+            return personal
 
         cedula = data.get('cedula') or ''
         primer_nombre = data.get('primer_nombre') or ''
         primer_apellido = data.get('primer_apellido') or ''
-        categoria = data.get('categoria') or 'Profesor'
+        cargo = data.get('cargo') or 'Profesor'
 
-        # Rol en usuarios según la categoría del personal
-        categoria_lower = categoria.lower()
-        if 'director' in categoria_lower or 'coordinador' in categoria_lower:
+        # Rol en usuarios según el cargo del personal
+        cargo_lower = cargo.lower()
+        if 'director' in cargo_lower or 'coordinador' in cargo_lower:
             rol = 'directivo'
-        elif categoria_lower == 'administrativo':
+        elif cargo_lower == 'administrativo':
             rol = 'secretaria'
         else:
             rol = 'profesor'
@@ -82,7 +85,16 @@ class PersonalService:
             rol=rol,
             activo=True,
         )
-        return Profesores.objects.create(**data, id_usuario=usuario)
+        personal = Profesores.objects.create(**data, id_usuario=usuario)
+        PersonalService._guardar_hijos(personal, hijos)
+        return personal
+
+    @staticmethod
+    def _guardar_hijos(personal, hijos):
+        HijosPersonal.objects.bulk_create([
+            HijosPersonal(personal=personal, **hijo)
+            for hijo in hijos
+        ])
 
     @staticmethod
     def _generar_email_unico(cedula) -> str:

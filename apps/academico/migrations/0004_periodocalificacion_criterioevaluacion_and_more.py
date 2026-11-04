@@ -9,7 +9,7 @@ def _crear_tablas_calificaciones(apps, schema_editor):
     """
     Crea las 4 tablas del módulo de calificaciones dinámicas.
 
-    MariaDB (producción): columnas INT(10) UNSIGNED para las FK que referencian
+    MariaDB (producción): columnas INT(11) para las FK que referencian
     PKs legacy (alumnos.id_alumno, grupos_academicos.id_grupo) + FKs físicas,
     evitando errno 150 (mismatch de tipos entre INT signed y INT UNSIGNED).
     SQLite (BD de tests): definición equivalente sin FKs físicas, ya que las
@@ -33,7 +33,7 @@ def _crear_tablas_calificaciones(apps, schema_editor):
                 `id` bigint(20) NOT NULL AUTO_INCREMENT,
                 `materia_nombre` varchar(100) NOT NULL,
                 `descripcion_criterio` varchar(255) NOT NULL,
-                `id_grupo_academico` int(10) unsigned NOT NULL,
+                `id_grupo_academico` int(11) NOT NULL,
                 PRIMARY KEY (`id`),
                 CONSTRAINT `fk_criterio_evaluacion_grupo`
                     FOREIGN KEY (`id_grupo_academico`) REFERENCES `grupos_academicos` (`id_grupo`) ON DELETE CASCADE
@@ -45,7 +45,7 @@ def _crear_tablas_calificaciones(apps, schema_editor):
                 `literal_final` varchar(1) NOT NULL,
                 `promovido_al_grado` varchar(50) NOT NULL,
                 `fecha_expedicion` date NOT NULL,
-                `id_alumno` int(10) unsigned NOT NULL,
+                `id_alumno` int(11) NOT NULL,
                 PRIMARY KEY (`id`),
                 UNIQUE KEY `constancia_prosecucion_final_alumno_periodo_escolar_uniq` (`id_alumno`, `periodo_escolar`),
                 CONSTRAINT `fk_constancia_pros_alumno`
@@ -56,7 +56,7 @@ def _crear_tablas_calificaciones(apps, schema_editor):
                 `id` bigint(20) NOT NULL AUTO_INCREMENT,
                 `indicador` varchar(2) NOT NULL,
                 `sugerencias` longtext DEFAULT NULL,
-                `id_alumno` int(10) unsigned NOT NULL,
+                `id_alumno` int(11) NOT NULL,
                 `id_criterio` bigint(20) NOT NULL,
                 `id_periodo` bigint(20) NOT NULL,
                 PRIMARY KEY (`id`),
@@ -162,6 +162,7 @@ class Migration(migrations.Migration):
                         'verbose_name': 'Periodo de Calificación',
                         'verbose_name_plural': 'Periodos de Calificación',
                         'db_table': 'periodo_calificacion',
+                        'managed': False,
                     },
                 ),
                 migrations.CreateModel(
@@ -176,6 +177,7 @@ class Migration(migrations.Migration):
                         'verbose_name': 'Criterio de Evaluación',
                         'verbose_name_plural': 'Criterios de Evaluación',
                         'db_table': 'criterio_evaluacion',
+                        'managed': False,
                     },
                 ),
                 migrations.CreateModel(
@@ -192,6 +194,7 @@ class Migration(migrations.Migration):
                         'verbose_name': 'Constancia de Prosecución Final',
                         'verbose_name_plural': 'Constancias de Prosecución Final',
                         'db_table': 'constancia_prosecucion_final',
+                        'managed': False,
                         'unique_together': {('alumno', 'periodo_escolar')},
                     },
                 ),
@@ -209,6 +212,7 @@ class Migration(migrations.Migration):
                         'verbose_name': 'Evaluación de Lapso por Criterio',
                         'verbose_name_plural': 'Evaluaciones de Lapso por Criterio',
                         'db_table': 'evaluacion_lapso_criterio',
+                        'managed': False,
                         'unique_together': {('alumno', 'criterio', 'periodo')},
                     },
                 ),

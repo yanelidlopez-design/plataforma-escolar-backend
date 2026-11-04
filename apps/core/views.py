@@ -1,10 +1,18 @@
+from urllib.parse import urlencode
+
+from django.conf import settings
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.core.mail import send_mail
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import permission_classes
-from rest_framework.decorators import api_view
+from rest_framework.decorators import (
+    action, api_view, authentication_classes, permission_classes, throttle_classes,
+)
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_yasg.utils import swagger_auto_schema
-from django.conf import settings
 from .models import (
     Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
     NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
@@ -12,7 +20,8 @@ from .models import (
 from .serializers import (
     DireccionesSerializer, ConfiguracionPlantelSerializer, PeriodosAcademicosSerializer,
     NivelesEducativosSerializer, TurnosSerializer, GradosAcademicosSerializer,
-    SeccionesSerializer, UsuariosSerializer
+    SeccionesSerializer, UsuariosSerializer, CambioContrasenaSerializer,
+    SolicitarRestablecimientoSerializer, ConfirmarRestablecimientoSerializer,
 )
 
 # Permisos globales para los conjuntos de vistas de control del plantel
@@ -20,6 +29,7 @@ from apps.academico.permissions import EsAdministrador
 
 @swagger_auto_schema(method='post', tags=['Authentication'])
 @api_view(['POST'])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def custom_token_obtain(request):
     """Custom token endpoint for Usuarios model with nombre_usuario field"""
@@ -84,6 +94,102 @@ def custom_token_logout(request):
     response.delete_cookie('access_token')
     return response
 
+
+class UsuariosPasswordResetTokenGenerator(PasswordResetTokenGenerator):
+    def _make_hash_value(self, user, timestamp):
+        return f'{user.pk}{user.clave_hash}{timestamp}{user.email}'
+
+
+password_reset_token_generator = UsuariosPasswordResetTokenGenerator()
+
+
+class PasswordResetThrottle(AnonRateThrottle):
+    scope = 'password_reset'
+
+
+@swagger_auto_schema(method='post', tags=['Authentication'])
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([PasswordResetThrottle])
+def solicitar_restauracion_contrasena(request):
+    serializer = SolicitarRestablecimientoSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    email = serializer.validated_data['email']
+
+    usuarios = Usuarios.objects.filter(email__iexact=email, activo=True)
+    if usuarios.count() == 1:
+        usuario = usuarios.get()
+        uid = urlsafe_base64_encode(force_bytes(usuario.pk))
+        token = password_reset_token_generator.make_token(usuario)
+        query = urlencode({'uid': uid, 'token': token})
+        frontend_url = settings.FRONTEND_URL.rstrip('/')
+        if frontend_url:
+            reset_url = f'{frontend_url}/recuperar-contrasena?{query}'
+        else:
+            reset_url = request.build_absolute_uri(f'/recuperar-contrasena?{query}')
+        send_mail(
+            'Restablece tu contraseña de Plataforma Escolar',
+            (
+                'Recibimos una solicitud para restablecer la contraseña de tu cuenta. '
+                f'Usa este enlace dentro de una hora: {reset_url}\n\n'
+                'Si no solicitaste este cambio, puedes ignorar este mensaje.'
+            ),
+            settings.DEFAULT_FROM_EMAIL,
+            [usuario.email],
+        )
+
+    return Response(
+        {
+            'detail': (
+                'Si el correo está asociado a una cuenta activa, recibirás '
+                'instrucciones para restablecer la contraseña.'
+            )
+        },
+        status=status.HTTP_202_ACCEPTED,
+    )
+
+
+@swagger_auto_schema(method='post', tags=['Authentication'])
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
+@throttle_classes([PasswordResetThrottle])
+def confirmar_restauracion_contrasena(request):
+    serializer = ConfirmarRestablecimientoSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+        uid = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
+        usuario = Usuarios.objects.get(
+            pk=uid,
+            activo=True,
+        )
+    except (TypeError, ValueError, OverflowError, Usuarios.DoesNotExist):
+        return Response(
+            {'token': ['El enlace no es válido o ha expirado.']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if not password_reset_token_generator.check_token(
+        usuario,
+        serializer.validated_data['token'],
+    ):
+        return Response(
+            {'token': ['El enlace no es válido o ha expirado.']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    serializer = ConfirmarRestablecimientoSerializer(
+        data=request.data,
+        context={'user': usuario},
+    )
+    serializer.is_valid(raise_exception=True)
+    usuario.set_password(serializer.validated_data['contrasena_nueva'])
+    usuario.save(update_fields=['clave_hash'])
+    return Response({'detail': 'Contraseña restablecida correctamente.'})
+
+
 @swagger_auto_schema(tags=['Direcciones'])
 class DireccionesViewSet(viewsets.ModelViewSet):
     queryset = Direcciones.objects.all()
@@ -127,3 +233,44 @@ class SeccionesViewSet(viewsets.ModelViewSet):
 class UsuariosViewSet(viewsets.ModelViewSet):
     queryset = Usuarios.objects.all()
     serializer_class = UsuariosSerializer
+    permission_classes = [EsAdministrador]
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        """Return the authenticated user without exposing password data."""
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='cambiar-password',
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def cambiar_password(self, request):
+        serializer = CambioContrasenaSerializer(
+            data=request.data,
+            context={'user': request.user},
+        )
+        serializer.is_valid(raise_exception=True)
+        usuario = request.user
+
+        if not hasattr(usuario, 'check_password') or not hasattr(usuario, 'set_password'):
+            return Response(
+                {'detail': 'La cuenta autenticada no permite cambiar su contraseña aquí.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not usuario.check_password(serializer.validated_data['contrasena_actual']):
+            return Response(
+                {'contrasena_actual': ['La contraseña actual es incorrecta.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if usuario.check_password(serializer.validated_data['contrasena_nueva']):
+            return Response(
+                {'contrasena_nueva': ['La nueva contraseña debe ser diferente a la actual.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        usuario.set_password(serializer.validated_data['contrasena_nueva'])
+        usuario.save(update_fields=['clave_hash'])
+        return Response({'detail': 'Contraseña actualizada correctamente.'})

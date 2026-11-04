@@ -26,9 +26,11 @@ from typing import Any, Dict, List, Set
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from ..models import (
     Alumnos,
+    AprendizajeAlcanzado,
     CriterioEvaluacion,
     EvaluacionLapsoCriterio,
     GruposAcademicos,
@@ -142,15 +144,20 @@ class ValidadorEducacionPrimaria(ValidadorPedagogicoABC):
 
     def validar_evaluacion(self, datos_evaluacion: Dict[str, Any]) -> Dict[str, Any]:
         literal = (datos_evaluacion.get('literal') or '').strip().upper()
+        informe = (
+            (datos_evaluacion.get('informe_descriptivo') or '').strip()
+        )
+        if not literal and informe:
+            return {
+                'indicador': '',
+                'sugerencias': informe,
+                'informe_descriptivo': None,
+            }
         if literal not in self.INDICADORES_VALIDOS:
             raise CalificacionesServiceError(
                 f'Indicador inválido "{literal}". '
                 f'Use uno de: {", ".join(self.INDICADORES_VALIDOS)}.'
             )
-
-        informe = (
-            (datos_evaluacion.get('informe_descriptivo') or '').strip()
-        )
 
         return {
             'indicador': literal,
@@ -225,6 +232,7 @@ class CalificacionesService:
         periodo_id: int,
         nivel_educativo: str,
         lote_datos: List[Dict[str, Any]],
+        aprendizajes_por_alumno: Dict[int, List[Dict[str, Any]]] | None = None,
     ) -> Dict[str, Any]:
         """
         Procesa un lote masivo de evaluaciones cualitativas de forma atómica.
@@ -280,6 +288,7 @@ class CalificacionesService:
         # 3) Extraer IDs únicos de alumnos y criterios de todo el lote.
         ids_alumnos: Set[int] = set()
         ids_criterios: Set[int] = set()
+        criterios_por_alumno: Dict[int, Set[int]] = {}
         for item in lote_datos:
             alumno_id = item.get('alumno_id')
             if alumno_id is not None:
@@ -287,6 +296,8 @@ class CalificacionesService:
             criterio_id = item.get('criterio_id')
             if criterio_id is not None:
                 ids_criterios.add(int(criterio_id))
+                criterios_por_alumno.setdefault(int(alumno_id), set()).add(int(criterio_id))
+        ids_alumnos.update(int(alumno_id) for alumno_id in (aprendizajes_por_alumno or {}))
 
         # 4) Consultas indexadas únicas contra el problema N+1.
         #    Los resultados se cargan en sets de Python para búsquedas O(1).
@@ -340,6 +351,40 @@ class CalificacionesService:
 
             total_evaluaciones += 1
 
+        aprendizajes_actualizados = 0
+        for alumno_id, aprendizajes in (aprendizajes_por_alumno or {}).items():
+            alumno_id = int(alumno_id)
+            if alumno_id not in alumnos_validos:
+                raise CalificacionesServiceError(
+                    f'El alumno con id_alumno={alumno_id} no existe en el sistema.'
+                )
+            evaluaciones_anteriores = EvaluacionLapsoCriterio.objects.filter(
+                alumno_id=alumno_id,
+                periodo_id=periodo.id,
+            )
+            criterios_actuales = criterios_por_alumno.get(alumno_id, set())
+            if criterios_actuales:
+                evaluaciones_anteriores.exclude(criterio_id__in=criterios_actuales).delete()
+            else:
+                evaluaciones_anteriores.delete()
+            AprendizajeAlcanzado.objects.filter(
+                alumno_id=alumno_id,
+                periodo_id=periodo.id,
+            ).delete()
+            AprendizajeAlcanzado.objects.bulk_create([
+                AprendizajeAlcanzado(
+                    alumno_id=alumno_id,
+                    periodo_id=periodo.id,
+                    texto=item['texto'].strip(),
+                    sugerencias=(item.get('sugerencias') or '').strip() or None,
+                    indicador=item['indicador'],
+                    criterio_id=item.get('id_criterio'),
+                    orden=item.get('orden', orden),
+                )
+                for orden, item in enumerate(aprendizajes)
+            ])
+            aprendizajes_actualizados += 1
+
         logger.info(
             'Carga masiva de criterios procesada: periodo=%s, nivel=%s, '
             'creadas=%s, actualizadas=%s, total=%s',
@@ -357,6 +402,7 @@ class CalificacionesService:
             'creadas': creadas,
             'actualizadas': actualizadas,
             'total_evaluaciones': total_evaluaciones,
+            'aprendizajes_actualizados': aprendizajes_actualizados,
         }
 
     # -------------------------------------------------------------------------
@@ -377,7 +423,8 @@ class CalificacionesService:
            ``distinct()`` + ``select_related('grado', 'seccion', 'turno')``.
         2. Criterios del grupo: ``only`` sobre las 3 columnas que
            consume la UI.
-        3. Alumnos inscritos ``estado_inscripcion='Activa'``:
+          3. Alumnos inscritos ``estado_inscripcion='Activa'`` y sus
+              aprendizajes guardados para el lapso:
            ``select_related('alumno')`` + ``only`` (1 consulta).
 
         Args:
@@ -402,7 +449,10 @@ class CalificacionesService:
             grupo = (
                 GruposAcademicos.objects
                 .select_related('grado', 'seccion', 'turno')
-                .filter(criterioevaluacion__evaluacionlapso__periodo=periodo)
+                .filter(
+                    Q(criterioevaluacion__periodos_configurados__periodo=periodo)
+                    | Q(criterioevaluacion__evaluacionlapso__periodo=periodo)
+                )
                 .distinct()
                 .first()
             )
@@ -423,7 +473,10 @@ class CalificacionesService:
                 'materia_nombre': c.materia_nombre,
                 'descripcion_criterio': c.descripcion_criterio,
             }
-            for c in CriterioEvaluacion.objects.filter(grupo=grupo).only(
+            for c in CriterioEvaluacion.objects.filter(grupo=grupo).filter(
+                Q(periodos_configurados__periodo=periodo)
+                | Q(evaluacionlapso__periodo=periodo)
+            ).distinct().only(
                 'id', 'materia_nombre', 'descripcion_criterio'
             )
         ]
@@ -433,20 +486,60 @@ class CalificacionesService:
             Inscripciones.objects
             .filter(grupo=grupo, estado_inscripcion='Activa')
             .select_related('alumno')
+            .prefetch_related('alumno__representantes_vinculados__representante')
             .only(
                 'alumno__id_alumno', 'alumno__primer_nombre',
                 'alumno__primer_apellido', 'alumno__cedula_escolar',
+                'alumno__fecha_nacimiento', 'alumno__numero_documento_identidad',
             )
         )
-        alumnos = [
-            {
-                'id': ins.alumno.id_alumno,
-                'primer_nombre': ins.alumno.primer_nombre,
-                'primer_apellido': ins.alumno.primer_apellido,
-                'cedula': ins.alumno.cedula_escolar,
-            }
-            for ins in inscripciones_qs
-        ]
+        from django.utils import timezone
+        alumnos = []
+        for ins in inscripciones_qs:
+            alumno = ins.alumno
+            # Calcular edad
+            edad = None
+            if alumno.fecha_nacimiento:
+                today = timezone.now().date()
+                birth_date = alumno.fecha_nacimiento
+                edad = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+
+            # Obtener representante principal
+            representante_principal = None
+            rep_vinculado = alumno.representantes_vinculados.filter(es_principal=True).first()
+            if rep_vinculado and rep_vinculado.representante:
+                rep = rep_vinculado.representante
+                representante_principal = f"{rep.primer_nombre} {rep.primer_apellido}".strip()
+
+            alumnos.append({
+                'id': alumno.id_alumno,
+                'primer_nombre': alumno.primer_nombre,
+                'primer_apellido': alumno.primer_apellido,
+                'cedula_escolar': alumno.cedula_escolar,
+                'numero_documento_identidad': alumno.numero_documento_identidad,
+                'fecha_nacimiento': alumno.fecha_nacimiento,
+                'edad': edad,
+                'representante_principal': representante_principal,
+            })
+
+        aprendizajes_guardados = {}
+        for registro in AprendizajeAlcanzado.objects.filter(
+            periodo=periodo,
+            alumno_id__in=[alumno['id'] for alumno in alumnos],
+        ).select_related('criterio').only(
+            'alumno_id', 'texto', 'sugerencias', 'indicador', 'orden', 'criterio_id',
+            'criterio__descripcion_criterio',
+        ).order_by('alumno_id', 'orden', 'id'):
+            aprendizajes_guardados.setdefault(registro.alumno_id, []).append({
+                'texto': registro.texto,
+                'sugerencias': registro.sugerencias,
+                'indicador': registro.indicador,
+                'id_criterio': registro.criterio_id,
+                'criterio_nombre': registro.criterio.descripcion_criterio if registro.criterio else '',
+                'orden': registro.orden,
+            })
+        for alumno in alumnos:
+            alumno['aprendizajes_alcanzados'] = aprendizajes_guardados.get(alumno['id'], [])
 
         return {
             'success': True,
@@ -459,4 +552,3 @@ class CalificacionesService:
             'criterios': criterios,
             'alumnos': alumnos,
         }
-
