@@ -64,6 +64,30 @@ Configura también las variables SMTP (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_U
 
 El arranque de Render también ejecuta `ensure_legacy_schema` antes de las migraciones. El archivo raíz `docker-entrypoint-initdb.sql` define el esquema estructural completo de las tablas legacy usadas por el backend: usuarios/direcciones, personal, alumnos, períodos/grupos, inscripciones, calificaciones, asistencias y representantes. Todas las instrucciones usan `CREATE TABLE IF NOT EXISTS`; no importan filas ni reemplazan tablas existentes.
 
+## Publicar una imagen Docker para SnapDeploy
+
+El workflow `.github/workflows/publish-container.yml` construye la aplicación con el
+`Dockerfile` de la raíz y publica la imagen en GitHub Container Registry (GHCR) al
+actualizar `master`, o cuando se ejecuta manualmente desde GitHub Actions. Publica
+las etiquetas `latest` y `sha-<commit>`.
+
+Para usarla en SnapDeploy:
+
+1. Confirma los cambios y súbelos a `master` para iniciar el workflow. Espera a que
+   **Publish container image** termine correctamente en la pestaña **Actions**.
+2. En GitHub, abre el paquete `plataforma-escolar-backend` asociado al repositorio,
+   entra en **Package settings** y cambia su visibilidad a **Public** si SnapDeploy
+   requiere una imagen pública.
+3. En SnapDeploy, selecciona **Imagen pública de Docker por nombre** e indica
+   `ghcr.io/yanelidlopez-design/plataforma-escolar-backend:latest`. Configura el
+   puerto del contenedor como `8000`.
+4. Añade en SnapDeploy las variables de entorno de producción documentadas arriba.
+   No incluyas secretos en la imagen ni en el repositorio.
+
+La instancia gratuita de SnapDeploy puede dormir y no ofrece disco persistente.
+Los archivos guardados en `media/` pueden perderse al reiniciar o volver a desplegar;
+mantén los respaldos de datos en un almacenamiento separado.
+
 ## Migraciones y esquema legacy
 
 Las migraciones existentes de `backend/apps/` se conservan y se agrega `academico.0010_reporte`. Varias entidades legacy usan `managed = False`, por lo que `migrate` no crea sus tablas. El entrypoint aplica primero el esquema SQL versionado y luego las migraciones. En una instalación con tablas preexistentes, `CREATE TABLE IF NOT EXISTS` las deja intactas, pero no verifica ni actualiza su estructura; valida previamente que coincidan con los modelos desplegados. Para copiar los registros de otro entorno, restaura un dump validado en la base destino antes de desplegar. El esquema de arranque no incluye datos de ejemplo ni credenciales de usuarios.
