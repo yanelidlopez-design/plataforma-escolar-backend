@@ -125,7 +125,7 @@ jobs:
     - name: Run bandit security scan (SAST)
       run: |
         # Guardar el reporte JSON y fallar ante hallazgos de severidad media o alta.
-        bandit -r backend/apps/ -f json -o bandit-report.json
+        bandit -r backend/apps/ -ll -f json -o bandit-report.json
         bandit -r backend/apps/ -ll
 
     - name: Upload bandit report
