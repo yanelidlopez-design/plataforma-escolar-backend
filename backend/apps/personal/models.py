@@ -148,7 +148,7 @@ class AlumnoRepresentante(models.Model):
     En Django con managed = False, se establece primary_key=True en la relación
     con 'alumno' y unique_together en la Meta para soportar la integridad compuesta.
     """
-    alumno= models.ForeignKey(
+    alumno = models.OneToOneField(
         'academico.Alumnos',
         on_delete=models.CASCADE,
         db_column='id_alumno',

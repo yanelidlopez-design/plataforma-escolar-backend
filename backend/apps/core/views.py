@@ -6,12 +6,14 @@ from django.core.mail import send_mail
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import viewsets, permissions, status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.decorators import (
     action, api_view, authentication_classes, permission_classes, throttle_classes,
 )
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 from drf_yasg.utils import swagger_auto_schema
 from .models import (
     Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
@@ -22,6 +24,7 @@ from .serializers import (
     NivelesEducativosSerializer, TurnosSerializer, GradosAcademicosSerializer,
     SeccionesSerializer, UsuariosSerializer, CambioContrasenaSerializer,
     SolicitarRestablecimientoSerializer, ConfirmarRestablecimientoSerializer,
+    CustomTokenObtainPairSerializer,
 )
 
 # Permisos globales para los conjuntos de vistas de control del plantel
@@ -85,6 +88,54 @@ def custom_token_obtain(request):
             {'detail': 'Invalid credentials'},
             status=status.HTTP_401_UNAUTHORIZED
         )
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    TokenObtainPairView basada en clase para core.Usuarios.
+
+    Usa CustomTokenObtainPairSerializer (acepta 'username' o 'nombre_usuario',
+    busca por nombre_usuario o email, verifica con check_password).
+    Además setea el access_token como cookie HttpOnly, igual que el endpoint
+    function-based custom_token_obtain.
+    """
+
+    serializer_class = CustomTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except AuthenticationFailed:
+            return Response(
+                {'detail': 'Invalid credentials'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        data = serializer.validated_data
+        user = serializer.user
+
+        response = Response({
+            'access': data['access'],
+            'refresh': data.get('refresh'),
+            'user': {
+                'username': user.nombre_usuario,
+                'id_usuario': user.id_usuario,
+                'activo': user.activo,
+            },
+        })
+
+        secure_cookie = not settings.DEBUG
+        response.set_cookie(
+            'access_token',
+            data['access'],
+            httponly=True,
+            secure=secure_cookie,
+            samesite='Lax',
+            max_age=60 * 15,  # 15 minutes (same as JWT access token lifetime)
+        )
+        return response
+
 
 @swagger_auto_schema(method='post', tags=['Authentication'])
 @api_view(['POST'])

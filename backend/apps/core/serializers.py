@@ -132,36 +132,46 @@ class ConfirmarRestablecimientoSerializer(RestablecerContrasenaSerializer):
 # JWT Custom Serializer
 User = get_user_model()
 
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Serializer JWT personalizado para el modelo core.Usuarios.
+
+    Acepta la clave 'username' (que el frontend envía) y también 'nombre_usuario'.
+    Busca el usuario por nombre_usuario o por email (ambos son únicos en Usuarios).
+    Verifica la contraseña con check_password y construye el token directamente,
+    sin volver a llamar a authenticate() del padre (que buscaría en auth.User).
+    """
+
     def validate(self, attrs):
-        # The parent class expects 'username', but we're receiving 'nombre_usuario'
-        # or whatever the USERNAME_FIELD is
-        username = attrs.get('username')
+        username = attrs.get('username') or attrs.get('nombre_usuario')
         password = attrs.get('password')
 
-        if username and password:
+        if not username or not password:
+            raise serializers.ValidationError(
+                {'detail': 'Username and password are required'}
+            )
+
+        # Buscar por nombre_usuario primero, luego por email como fallback
+        user = None
+        try:
+            user = Usuarios.objects.get(nombre_usuario=username)
+        except Usuarios.DoesNotExist:
             try:
-                user = User.objects.get(**{User.USERNAME_FIELD: username})
-                if user.check_password(password):
-                    attrs['user'] = user
-                    return super().validate(attrs)
-            except User.DoesNotExist:
+                user = Usuarios.objects.get(email=username)
+            except Usuarios.DoesNotExist:
                 pass
+
+        if user and user.check_password(password) and user.activo:
+            self.user = user
+            data = {}
+            refresh = self.get_token(self.user)
+            data['refresh'] = str(refresh)
+            data['access'] = str(refresh.access_token)
+            return data
 
         from rest_framework.exceptions import AuthenticationFailed
         raise AuthenticationFailed('Invalid credentials')
-
-
-class CustomBackend(ModelBackend):
-    def authenticate(self, request, username=None, password=None, **kwargs):
-        try:
-            user = User.objects.get(**{User.USERNAME_FIELD: username})
-        except ObjectDoesNotExist:
-            return None
-
-        if user.check_password(password) and self.user_can_authenticate(user):
-            return user
-        return None
 
 
 class CustomBackend(ModelBackend):

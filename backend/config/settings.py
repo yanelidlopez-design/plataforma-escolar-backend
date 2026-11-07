@@ -1,8 +1,13 @@
 from pathlib import Path
-import drf_yasg
+import os
+import ssl
 import sys
+from urllib.parse import parse_qs, urlparse
+
+import drf_yasg
 import environ
 import dj_database_url
+from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -15,6 +20,9 @@ env = environ.Env(
     DEBUG=(bool, False)
 )
 environ.Env.read_env(BASE_DIR / '.env')
+# python-dotenv: asegura que las variables de .env estén disponibles sin
+# sobrescribir las ya inyectadas en el entorno (p. ej. SnapDeploy).
+load_dotenv(BASE_DIR / '.env', override=False)
 
 DEBUG = env.bool('DEBUG', default=False)
 SECRET_KEY = env(
@@ -54,6 +62,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'drf_yasg',
     'rest_framework',
+    'rest_framework_simplejwt',
     'corsheaders',
     'django_q',
 
@@ -95,46 +104,75 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# MariaDB usa el backend MySQL de Django. Convierte el esquema de URL para que
-# la configuración funcione también con versiones de dj-database-url sin alias mariadb.
-database_url = env('DATABASE_URL', default='')
-if database_url:
-    if database_url.startswith('mariadb://'):
-        database_url = f'mysql://{database_url.removeprefix("mariadb://")}'
-    DATABASES = {
-        'default': dj_database_url.parse(
-            database_url,
-            conn_max_age=600,
-            conn_health_checks=True,
-        )
-    }
-else:
-    legacy_database_values = ('DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_PORT')
-    if not all(env(key, default='') for key in legacy_database_values):
-        raise ImproperlyConfigured(
-            'Configura DATABASE_URL o todas las variables DB_NAME, DB_USER, '
-            'DB_PASSWORD, DB_HOST y DB_PORT.'
-        )
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': env('DB_NAME'),
-            'USER': env('DB_USER'),
-            'PASSWORD': env('DB_PASSWORD'),
-            'HOST': env('DB_HOST'),
-            'PORT': env('DB_PORT'),
-            'OPTIONS': {
-                'charset': 'utf8mb4',
-                'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            },
-        }
-    }
+# --- Base de datos (MariaDB / MySQL en Layerbase) -----------------------
+# Se prefiere DATABASE_URL (connection string completa de Layerbase).
+# dj-database-url no consume el parámetro ?ssl-mode=REQUIRED de la URL, por lo
+# que el SSL se activa explícitamente cuando la URL lo indica o mediante DB_SSL.
+def _ssl_options(database_url_value: str, ssl_mode_value: str) -> dict:
+    require_ssl = bool(database_url_value) or os.getenv(
+        "DB_SSL", "false"
+    ).lower() in ("1", "true", "yes", "on") or (
+        ssl_mode_value or ""
+    ).lower() in ("required", "verify-ca", "verify-full")
+    if not require_ssl:
+        return {}
+    ctx = ssl.create_default_context()
+    mode = (ssl_mode_value or "").lower()
+    # ssl-mode=REQUIRED => cifrar la conexión sin validar la identidad del servidor.
+    if mode in ("required",):
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    return {"context": ctx}
 
-DATABASES['default'].setdefault('OPTIONS', {})
-DATABASES['default']['OPTIONS'].setdefault('charset', 'utf8mb4')
-DATABASES['default']['OPTIONS'].setdefault(
-    'init_command',
-    "SET sql_mode='STRICT_TRANS_TABLES'",
+
+database_url = os.getenv("DATABASE_URL", "")
+ssl_mode_from_url = ""
+if database_url:
+    if database_url.startswith("mariadb://"):
+        database_url = "mysql://" + database_url[len("mariadb://"):]
+    ssl_mode_from_url = (
+        parse_qs(urlparse(database_url).query).get("ssl-mode") or [""]
+    )[0]
+    db_config = dj_database_url.parse(
+        database_url,
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+    # dj-database-url vuelca parámetros de consulta (ssl-mode) en OPTIONS;
+    # el conector MySQL no los acepta como kwargs. El SSL se inyecta vía
+    # _ssl_options (clave "context").
+    db_config.setdefault("OPTIONS", {}).pop("ssl-mode", None)
+else:
+    # Fallback a variables individuales con valores por defecto seguros.
+    # En producción (SnapDeploy) se recomienda definir DATABASE_URL completo.
+    db_config = {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": os.getenv("DB_NAME", "plataforma_escolar"),
+        "USER": os.getenv("DB_USER", "root"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv(
+            "DB_HOST",
+            "plataforma-escolar-dear-forge.sage.cloud.layerbase.dev",
+        ),
+        "PORT": os.getenv("DB_PORT", "47695"),
+    }
+    ssl_mode_from_url = os.getenv("DB_SSL_MODE", "")
+
+    if not DEBUG and not db_config["PASSWORD"]:
+        raise ImproperlyConfigured("DB_PASSWORD debe configurarse en producción.")
+
+db_config.setdefault("OPTIONS", {})
+db_config["OPTIONS"].setdefault("charset", "utf8mb4")
+db_config["OPTIONS"]["init_command"] = "SET sql_mode='STRICT_TRANS_TABLES'"
+db_config["OPTIONS"].update(_ssl_options(database_url, ssl_mode_from_url))
+
+DATABASES = {"default": db_config}
+
+# Valores por defecto defensivos (no sobrescriben lo ya definido arriba).
+DATABASES["default"].setdefault("OPTIONS", {})
+DATABASES["default"]["OPTIONS"].setdefault("charset", "utf8mb4")
+DATABASES["default"]["OPTIONS"].setdefault(
+    "init_command", "SET sql_mode='STRICT_TRANS_TABLES'"
 )
 
 
@@ -157,6 +195,30 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.BasicAuthentication',
     ],
+}
+
+# Modelo de usuario personalizado (core.Usuarios, no auth.User)
+AUTH_USER_MODEL = 'core.Usuarios'
+
+# Backends de autenticación: CustomBackend sabe buscar por nombre_usuario/email
+# en el modelo Usuarios y verificar con check_password.
+AUTHENTICATION_BACKENDS = [
+    'apps.core.serializers.CustomBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
+# Configuración SimpleJWT adaptada al modelo Usuarios (managed = False,
+# sin heredar de AbstractBaseUser).
+SIMPLE_JWT = {
+    'USER_ID_FIELD': 'id_usuario',
+    'USER_ID_CLAIM': 'user_id',
+    'USER_AUTHENTICATION_RULE': (
+        lambda user: user.activo if hasattr(user, 'activo') else True
+    ),
+    'AUTH_TOKEN_CLASSES': (
+        'rest_framework_simplejwt.tokens.AccessToken',
+    ),
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 # CORS_ALLOWED_ORIGINS: Lee desde variable de entorno como string separado por comas
