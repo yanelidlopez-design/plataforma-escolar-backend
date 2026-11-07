@@ -553,3 +553,30 @@ class ConstanciaProsecucionFinal(models.Model):
 
     def __str__(self):
         return f"Constancia {self.alumno} - {self.periodo_escolar} ({self.literal_final})"
+
+
+class ConfiguracionAsistenciaPublica(models.Model):
+    """
+    Configuración para el enlace público de toma de asistencia.
+    Un solo registro controla el acceso público al formulario de asistencia.
+    Los profesores acceden con el token_acceso y seleccionan grado, sección y turno.
+    """
+
+    id_config = models.AutoField(primary_key=True, db_column='id_config')
+    activo = models.BooleanField(default=False, db_column='activo')
+    token_acceso = models.CharField(max_length=255, unique=True, db_column='token_acceso')
+    fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
+
+    class Meta:
+        managed = True
+        db_table = 'configuracion_asistencia_publica'
+        verbose_name = 'Configuración Asistencia Pública'
+        verbose_name_plural = 'Configuración Asistencia Pública'
+
+    def save(self, *args, **kwargs):
+        if not self.token_acceso:
+            self.token_acceso = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'Asistencia Pública - {"Activa" if self.activo else "Inactiva"}'
