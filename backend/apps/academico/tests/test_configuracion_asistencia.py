@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
-from academico.models import ConfiguracionAsistenciaPublica
+from apps.academico.models import ConfiguracionAsistenciaPublica
 
 class ConfiguracionAsistenciaPublicaModelTest(TestCase):
     def test_clean_rejects_weekend(self):

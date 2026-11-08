@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.db import IntegrityError
 
-from academico.models import ConfiguracionAsistenciaPublica
+from apps.academico.models import ConfiguracionAsistenciaPublica
 
 logger = logging.getLogger(__name__)
 
