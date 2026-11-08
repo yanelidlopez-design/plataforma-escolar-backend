@@ -18,6 +18,10 @@ from .views import (
     EvaluacionesCualitativasAdminAPIView,
     CriteriosEvaluacionAdminAPIView,
     EstadisticasDashboardAPIView,
+    AsistenciaPublicaGruposAPIView,
+    AsistenciaPublicaAlumnosAPIView,
+    RegistrarAsistenciaPublicaAPIView,
+    ConfiguracionAsistenciaPublicaViewSet,
 )
 
 router = DefaultRouter()
@@ -52,5 +56,12 @@ urlpatterns = [
     path('periodos/<int:pk>/alternar-estado/', AlternarUrlInscripcionAPIView.as_view(), name='alternar_estado_periodo'),
     path('exports/<str:reporte_id>/', estado_exportacion, name='estado_exportacion'),
     path('exports/<str:reporte_id>/descarga/', descargar_exportacion, name='descargar_exportacion'),
+    path('asistencia-publica/grupos/', AsistenciaPublicaGruposAPIView.as_view(), name='asistencia_publica_grupos'),
+    path('asistencia-publica/alumnos/', AsistenciaPublicaAlumnosAPIView.as_view(), name='asistencia_publica_alumnos'),
+    path('asistencia-publica/registrar/', RegistrarAsistenciaPublicaAPIView.as_view(), name='asistencia_publica_registrar'),
+    path('config/enlaces/asistencia/', ConfiguracionAsistenciaPublicaViewSet.as_view({'get': 'list', 'post': 'create'}), name='config_asistencia_publica'),
+    path('config/enlaces/asistencia/<int:pk>/', ConfiguracionAsistenciaPublicaViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='config_asistencia_publica_detalle'),
+    path('config/enlaces/asistencia/alternar-estado/', ConfiguracionAsistenciaPublicaViewSet.as_view({'post': 'alternar_estado'}), name='config_asistencia_alternar_estado'),
+    path('config/enlaces/asistencia/regenerar-token/', ConfiguracionAsistenciaPublicaViewSet.as_view({'post': 'regenerar_token'}), name='config_asistencia_regenerar_token'),
     path('', include(router.urls)),
 ]

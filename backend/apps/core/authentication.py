@@ -4,7 +4,7 @@ from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from rest_framework.authentication import BaseAuthentication
 
 from .models import Usuarios
-from apps.academico.models import PeriodoCalificacion
+from apps.academico.models import PeriodoCalificacion, ConfiguracionAsistenciaPublica
 
 
 class UsuariosJWTAuthentication(JWTAuthentication):
@@ -121,4 +121,47 @@ class URLTokenAuthentication(BaseAuthentication):
 
         # Crear un usuario autenticado por token con is_authenticated = True
         user = TokenDocenteUser(periodo)
+        return (user, token)
+
+
+class URLTokenAsistenciaAuthentication(BaseAuthentication):
+    """
+    Autenticación por token en parámetros de URL para el formulario público
+    de toma de asistencia.
+
+    Lee el token desde:
+      1. Query param ?token=...
+      2. Cabecera Authorization: Bearer <token>
+
+    Valida el token contra ConfiguracionAsistenciaPublica.token_acceso.
+    """
+
+    def authenticate(self, request):
+        query_dict = getattr(request, 'query_params', getattr(request, 'GET', {}))
+        token = query_dict.get('token')
+
+        if not token:
+            auth_header = getattr(request, 'headers', {}).get(
+                'Authorization', request.META.get('HTTP_AUTHORIZATION', '')
+            )
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(' ', 1)[1].strip()
+
+        if not token:
+            return None
+
+        try:
+            config = ConfiguracionAsistenciaPublica.objects.get(
+                token_acceso=token,
+                activo=True,
+            )
+        except ConfiguracionAsistenciaPublica.DoesNotExist:
+            raise AuthenticationFailed(
+                _('Token de acceso inválido o inactivo.'),
+                code='invalid_token',
+            )
+
+        # Usuario simulado autenticado por token público de asistencia
+        user = TokenDocenteUser(config)
+        user.username = f"asistencia_token_{config.id_config}"
         return (user, token)

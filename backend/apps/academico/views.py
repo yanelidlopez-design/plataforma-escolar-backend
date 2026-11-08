@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.db.models import ProtectedError, Prefetch
 import logging
+import secrets
 from datetime import date
 from .models import (
     Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias,
@@ -28,10 +29,14 @@ from .serializers import (
     CargaMasivaCalificacionesSerializer,
     CargaMasivaCriteriosSerializer,
     ConstanciaProsecucionFinalSerializer,
+    GrupoPublicoSerializer,
+    AlumnoPublicoSerializer,
+    RegistroAsistenciaInputSerializer,
+    ConfiguracionAsistenciaPublicaSerializer,
 )
 from .permissions import EsProfesorOAdmin, EsAdministrador
 from .decorators import validate_webhook_signature
-from apps.core.authentication import URLTokenAuthentication
+from apps.core.authentication import URLTokenAuthentication, URLTokenAsistenciaAuthentication
 from .reports import (
     exportar_alumnos_excel, exportar_alumnos_pdf, exportar_alumnos_csv,
     exportar_inscripciones_excel, exportar_inscripciones_pdf, exportar_inscripciones_csv,
@@ -2196,3 +2201,200 @@ class DescargaConstanciaProsecucionAPIView(APIView):
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
+
+
+class AsistenciaPublicaGruposAPIView(APIView):
+    """
+    Endpoint público para listar grupos disponibles para tomar asistencia.
+    Autenticado por URLTokenAsistenciaAuthentication (token público).
+    """
+    authentication_classes = [URLTokenAsistenciaAuthentication]
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        grupos = GruposAcademicos.objects.select_related(
+            'grado', 'seccion', 'turno'
+        ).all()
+
+        data = [
+            {
+                'id_grupo': g.id_grupo,
+                'grado': g.grado.nombre_grado,
+                'seccion': g.seccion.nombre_seccion,
+                'turno': g.turno.nombre_turno,
+            }
+            for g in grupos
+        ]
+        serializer = GrupoPublicoSerializer(data=data, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
+
+
+class AsistenciaPublicaAlumnosAPIView(APIView):
+    """
+    Endpoint público para obtener alumnos de un grupo específico.
+    Autenticado por URLTokenAsistenciaAuthentication (token público).
+    Recibe grupo_id como query parameter.
+    """
+    authentication_classes = [URLTokenAsistenciaAuthentication]
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        grupo_id = request.query_params.get('grupo_id')
+        if not grupo_id:
+            return Response(
+                {'detail': 'grupo_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            grupo = GruposAcademicos.objects.get(id_grupo=grupo_id)
+        except GruposAcademicos.DoesNotExist:
+            return Response(
+                {'detail': 'Grupo no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Obtener alumnos inscritos activos en este grupo
+        inscripciones = Inscripciones.objects.filter(
+            grupo=grupo,
+            estado_inscripcion='Activa',
+        ).select_related('alumno')
+
+        data = []
+        for inscripcion in inscripciones:
+            alumno = inscripcion.alumno
+            data.append({
+                'id_alumno': alumno.id_alumno,
+                'nombre_completo': f"{alumno.primer_nombre} {alumno.primer_apellido}",
+                'cedula_escolar': alumno.cedula_escolar or '',
+                'numero_documento': alumno.numero_documento_identidad or '',
+            })
+
+        serializer = AlumnoPublicoSerializer(data=data, many=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.data)
+
+
+class RegistrarAsistenciaPublicaAPIView(APIView):
+    """
+    Endpoint público para registrar asistencia masiva de alumnos.
+    Autenticado por URLTokenAsistenciaAuthentication (token público).
+    Recibe grupo_id y lista de asistencias en el body.
+    """
+    authentication_classes = [URLTokenAsistenciaAuthentication]
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        grupo_id = request.data.get('grupo_id')
+        asistencias = request.data.get('asistencias', [])
+
+        if not grupo_id:
+            return Response(
+                {'detail': 'grupo_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not asistencias or not isinstance(asistencias, list):
+            return Response(
+                {'detail': 'asistencias debe ser una lista no vacía'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            grupo = GruposAcademicos.objects.get(id_grupo=grupo_id)
+        except GruposAcademicos.DoesNotExist:
+            return Response(
+                {'detail': 'Grupo no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        errores = []
+        creados = 0
+        actualizados = 0
+
+        for item in asistencias:
+            serializer = RegistroAsistenciaInputSerializer(data=item)
+            if not serializer.is_valid():
+                errores.append({
+                    'id_alumno': item.get('id_alumno'),
+                    'errores': serializer.errors,
+                })
+                continue
+
+            datos = serializer.validated_data
+            try:
+                obj, created = Asistencias.objects.update_or_create(
+                    alumno_id=datos['id_alumno'],
+                    grupo=grupo,
+                    fecha=datos['fecha'],
+                    defaults={'estado': datos['estado']},
+                )
+                if created:
+                    creados += 1
+                else:
+                    actualizados += 1
+            except Exception as exc:
+                errores.append({
+                    'id_alumno': datos['id_alumno'],
+                    'errores': str(exc),
+                })
+
+        return Response({
+            'creados': creados,
+            'actualizados': actualizados,
+            'errores': errores,
+        }, status=status.HTTP_200_OK if not errores else status.HTTP_207_MULTI_STATUS)
+
+
+class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet para gestionar la configuración de asistencia pública desde el panel
+    administrativo (sección Config. Enlaces).
+
+    Permite al administrador:
+      - Ver la configuración actual (activo/inactivo, token_acceso).
+      - Activar o desactivar el enlace público de asistencia.
+      - Regenerar el token_acceso si es necesario.
+
+    Solo accesible para administradores (EsAdministrador).
+    """
+    queryset = ConfiguracionAsistenciaPublica.objects.all()
+    serializer_class = ConfiguracionAsistenciaPublicaSerializer
+    permission_classes = [EsAdministrador]
+
+    def perform_update(self, serializer):
+        # Si se desactiva, se mantiene el token pero se marca inactivo.
+        # Si se activa y no tiene token, se genera uno automáticamente en save().
+        serializer.save()
+
+    @action(detail=False, methods=['post'], url_path='alternar-estado')
+    def alternar_estado(self, request):
+        """
+        Alterna el estado activo/inactivo de la configuración de asistencia pública.
+        Si no existe ninguna configuración, la crea con activo=True.
+        """
+        config = ConfiguracionAsistenciaPublica.objects.first()
+        if not config:
+            config = ConfiguracionAsistenciaPublica.objects.create(activo=True)
+        else:
+            config.activo = not config.activo
+            config.save()
+
+        serializer = self.get_serializer(config)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='regenerar-token')
+    def regenerar_token(self, request):
+        """
+        Regenera el token_acceso de la configuración de asistencia pública.
+        Si no existe, la crea con un nuevo token.
+        """
+        config = ConfiguracionAsistenciaPublica.objects.first()
+        if not config:
+            config = ConfiguracionAsistenciaPublica.objects.create(activo=False)
+        config.token_acceso = secrets.token_urlsafe(32)
+        config.save()
+
+        serializer = self.get_serializer(config)
+        return Response(serializer.data, status=status.HTTP_200_OK)

@@ -15,6 +15,7 @@ from .models import (
     CriterioEvaluacion,
     EvaluacionLapsoCriterio,
     ConstanciaProsecucionFinal,
+    ConfiguracionAsistenciaPublica,
 )
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
@@ -1061,3 +1062,46 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
                     ]
                 }
             )
+
+
+class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
+    """
+    Serializer para la configuración de asistencia pública.
+    Solo lectura para el token_acceso (se autogenera en el modelo).
+    """
+
+    class Meta:
+        model = ConfiguracionAsistenciaPublica
+        fields = ['id_config', 'activo', 'token_acceso', 'fecha_creacion']
+        read_only_fields = ['id_config', 'token_acceso', 'fecha_creacion']
+
+
+class GrupoPublicoSerializer(serializers.Serializer):
+    """
+    Serializer ligero para listar grupos disponibles en el formulario público
+    de asistencia. Solo expone id, grado, sección y turno.
+    """
+    id_grupo = serializers.IntegerField()
+    grado = serializers.CharField()
+    seccion = serializers.CharField()
+    turno = serializers.CharField()
+
+
+class AlumnoPublicoSerializer(serializers.Serializer):
+    """
+    Serializer ligero para listar alumnos de un grupo en el formulario público
+    de asistencia. Expone id, nombre completo, cédula y estado inicial.
+    """
+    id_alumno = serializers.IntegerField()
+    nombre_completo = serializers.CharField()
+    cedula_escolar = serializers.CharField()
+    numero_documento = serializers.CharField()
+
+
+class RegistroAsistenciaInputSerializer(serializers.Serializer):
+    """
+    Serializer para registrar asistencia de un alumno en el formulario público.
+    """
+    id_alumno = serializers.IntegerField()
+    estado = serializers.ChoiceField(choices=['P', 'A', 'J'])
+    fecha = serializers.DateField()
