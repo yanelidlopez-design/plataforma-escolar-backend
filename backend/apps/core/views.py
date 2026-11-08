@@ -17,6 +17,11 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from drf_yasg.utils import swagger_auto_schema
 from .models import (
     Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
+    NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios,
+    ConfiguracionAsistenciaPublica,
+)  # added model
+
+    Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
     NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
 )
 from .serializers import (
@@ -27,7 +32,36 @@ from .serializers import (
     CustomTokenObtainPairSerializer,
 )
 
-# Permisos globales para los conjuntos de vistas de control del plantel
+
+from django.conf import settings
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from django.utils import timezone
+from academico.models import ConfiguracionAsistenciaPublica
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def asistencia_publica_link(request):
+    """Endpoint público que devuelve el enlace activo del día.
+    - Busca la configuración de hoy marcada como `activo=True`.
+    - Si no hay ninguna, responde 404.
+    - Retorna la URL completa (frontend + token) y el token.
+    """
+    today = timezone.localdate()
+    try:
+        config = ConfiguracionAsistenciaPublica.objects.get(fecha_dia=today, activo=True)
+    except ConfiguracionAsistenciaPublica.DoesNotExist:
+        return Response({'detail': 'No hay enlace activo para hoy'}, status=404)
+
+    # Construir URL pública; asume que el frontend tiene una ruta /asistencia/<token>
+    public_url = f"{settings.FRONTEND_URL.rstrip('/')}/asistencia/{config.token_acceso}"
+    return Response({
+        'url': public_url,
+        'token': config.token_acceso,
+        'fecha_dia': config.fecha_dia,
+    })
+
 from apps.academico.permissions import EsAdministrador
 
 @swagger_auto_schema(method='post', tags=['Authentication'])
@@ -90,7 +124,23 @@ def custom_token_obtain(request):
         )
 
 
-class CustomTokenObtainPairView(TokenObtainPairView):
+
+from academico.serializers import ConfiguracionAsistenciaPublicaSerializer
+
+class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
+    """CRUD para la configuración de enlace público de asistencia.
+    Sólo admin (staff) puede crear/editar. Lectura pública restringida a usuarios autenticados.
+    """
+    queryset = ConfiguracionAsistenciaPublica.objects.all()
+    serializer_class = ConfiguracionAsistenciaPublicaSerializer
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
     """
     TokenObtainPairView basada en clase para core.Usuarios.
 

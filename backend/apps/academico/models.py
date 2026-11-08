@@ -557,14 +557,58 @@ class ConstanciaProsecucionFinal(models.Model):
 
 class ConfiguracionAsistenciaPublica(models.Model):
     """
-    Configuración para el enlace público de toma de asistencia.
-    Un solo registro controla el acceso público al formulario de asistencia.
-    Los profesores acceden con el token_acceso y seleccionan grado, sección y turno.
+    Configuración para el enlace público de toma de asistencia diaria.
+    Se crea de lunes a viernes con vigencia de 24 horas (7:00 AM a 7:00 AM del día siguiente).
+    No se permiten fechas repetidas.
+    """
+    # Campos existentes
+    id_config = models.AutoField(primary_key=True, db_column='id_config')
+    activo = models.BooleanField(default=False, db_column='activo')
+    token_acceso = models.CharField(max_length=255, unique=True, db_column='token_acceso')
+    fecha_dia = models.DateField(unique=True, db_column='fecha_dia')
+    fecha_vigencia_inicio = models.DateTimeField(db_column='fecha_vigencia_inicio')
+    fecha_vigencia_fin = models.DateTimeField(db_column='fecha_vigencia_fin')
+    fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
+
+    def clean(self):
+        """Validaciones de negocio.
+        - Sólo se permite crear configuraciones de lunes a viernes.
+        - La vigencia siempre es de 24 horas comenzando a las 07:00 del día indicado.
+        """
+        from datetime import datetime, time, timedelta
+        from django.utils import timezone
+        # Validar día de la semana (0 = lunes, 4 = viernes)
+        if self.fecha_dia.weekday() > 4:
+            raise ValidationError('La configuración solo puede crearse de lunes a viernes.')
+        # Calcular inicio y fin de vigencia
+        inicio = datetime.combine(self.fecha_dia, time(hour=7, minute=0))
+        inicio = timezone.make_aware(inicio) if timezone.is_naive(inicio) else inicio
+        fin = inicio + timedelta(hours=24)
+        self.fecha_vigencia_inicio = inicio
+        self.fecha_vigencia_fin = fin
+
+    def save(self, *args, **kwargs):
+        # Generar token si no existe
+        if not self.token_acceso:
+            self.token_acceso = secrets.token_urlsafe(32)
+        # Ejecutar validaciones y cálculo de vigencia antes de guardar
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'Asistencia Pública - {self.fecha_dia} - {"Activa" if self.activo else "Inactiva"}'
+    """
+    Configuración para el enlace público de toma de asistencia diaria.
+    Se crea de lunes a viernes con vigencia de 24 horas (7:00 AM a 7:00 AM del día siguiente).
+    No se permiten fechas repetidas.
     """
 
     id_config = models.AutoField(primary_key=True, db_column='id_config')
     activo = models.BooleanField(default=False, db_column='activo')
     token_acceso = models.CharField(max_length=255, unique=True, db_column='token_acceso')
+    fecha_dia = models.DateField(unique=True, db_column='fecha_dia')
+    fecha_vigencia_inicio = models.DateTimeField(db_column='fecha_vigencia_inicio')
+    fecha_vigencia_fin = models.DateTimeField(db_column='fecha_vigencia_fin')
     fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
 
     class Meta:
@@ -572,6 +616,7 @@ class ConfiguracionAsistenciaPublica(models.Model):
         db_table = 'configuracion_asistencia_publica'
         verbose_name = 'Configuración Asistencia Pública'
         verbose_name_plural = 'Configuración Asistencia Pública'
+        ordering = ['-fecha_dia']
 
     def save(self, *args, **kwargs):
         if not self.token_acceso:
@@ -579,4 +624,4 @@ class ConfiguracionAsistenciaPublica(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f'Asistencia Pública - {"Activa" if self.activo else "Inactiva"}'
+        return f'Asistencia Pública - {self.fecha_dia} - {"Activa" if self.activo else "Inactiva"}'
