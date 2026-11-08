@@ -3,6 +3,8 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import send_mail
+from django.shortcuts import redirect
+from django.utils import timezone
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import viewsets, permissions, status
@@ -17,11 +19,6 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from drf_yasg.utils import swagger_auto_schema
 from .models import (
     Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
-    NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios,
-    ConfiguracionAsistenciaPublica,
-)  # added model
-
-    Direcciones, ConfiguracionPlantel, PeriodosAcademicos,
     NivelesEducativos, Turnos, GradosAcademicos, Secciones, Usuarios
 )
 from .serializers import (
@@ -32,37 +29,10 @@ from .serializers import (
     CustomTokenObtainPairSerializer,
 )
 
-
-from django.conf import settings
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from django.utils import timezone
-from academico.models import ConfiguracionAsistenciaPublica
-
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def asistencia_publica_link(request):
-    """Endpoint público que devuelve el enlace activo del día.
-    - Busca la configuración de hoy marcada como `activo=True`.
-    - Si no hay ninguna, responde 404.
-    - Retorna la URL completa (frontend + token) y el token.
-    """
-    today = timezone.localdate()
-    try:
-        config = ConfiguracionAsistenciaPublica.objects.get(fecha_dia=today, activo=True)
-    except ConfiguracionAsistenciaPublica.DoesNotExist:
-        return Response({'detail': 'No hay enlace activo para hoy'}, status=404)
-
-    # Construir URL pública; asume que el frontend tiene una ruta /asistencia/<token>
-    public_url = f"{settings.FRONTEND_URL.rstrip('/')}/asistencia/{config.token_acceso}"
-    return Response({
-        'url': public_url,
-        'token': config.token_acceso,
-        'fecha_dia': config.fecha_dia,
-    })
-
+# Permisos globales para los conjuntos de vistas de control del plantel
 from apps.academico.permissions import EsAdministrador
+from apps.academico.models import ConfiguracionAsistenciaPublica
+from apps.academico.serializers import ConfiguracionAsistenciaPublicaSerializer
 
 @swagger_auto_schema(method='post', tags=['Authentication'])
 @api_view(['POST'])
@@ -124,23 +94,7 @@ def custom_token_obtain(request):
         )
 
 
-
-from academico.serializers import ConfiguracionAsistenciaPublicaSerializer
-
-class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
-    """CRUD para la configuración de enlace público de asistencia.
-    Sólo admin (staff) puede crear/editar. Lectura pública restringida a usuarios autenticados.
-    """
-    queryset = ConfiguracionAsistenciaPublica.objects.all()
-    serializer_class = ConfiguracionAsistenciaPublicaSerializer
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
-
-    def create(self, request, *args, **kwargs):
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        return super().update(request, *args, **kwargs)
-
+class CustomTokenObtainPairView(TokenObtainPairView):
     """
     TokenObtainPairView basada en clase para core.Usuarios.
 
@@ -255,46 +209,41 @@ def solicitar_restauracion_contrasena(request):
 @api_view(['POST'])
 @authentication_classes([])
 @permission_classes([permissions.AllowAny])
-@throttle_classes([PasswordResetThrottle])
 def confirmar_restauracion_contrasena(request):
     serializer = ConfirmarRestablecimientoSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
     try:
         uid = force_str(urlsafe_base64_decode(serializer.validated_data['uid']))
-        usuario = Usuarios.objects.get(
-            pk=uid,
-            activo=True,
-        )
+        usuario = Usuarios.objects.get(pk=uid, activo=True)
     except (TypeError, ValueError, OverflowError, Usuarios.DoesNotExist):
         return Response(
-            {'token': ['El enlace no es válido o ha expirado.']},
+            {'detail': 'El enlace de recuperación es inválido o expiró.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
     if not password_reset_token_generator.check_token(
-        usuario,
-        serializer.validated_data['token'],
+        usuario, serializer.validated_data['token']
     ):
         return Response(
-            {'token': ['El enlace no es válido o ha expirado.']},
+            {'detail': 'El enlace de recuperación es inválido o expiró.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    serializer = ConfirmarRestablecimientoSerializer(
-        data=request.data,
-        context={'user': usuario},
-    )
-    serializer.is_valid(raise_exception=True)
-    usuario.set_password(serializer.validated_data['contrasena_nueva'])
+    usuario.set_password(serializer.validated_data['nueva_contrasena'])
     usuario.save(update_fields=['clave_hash'])
-    return Response({'detail': 'Contraseña restablecida correctamente.'})
+    return Response(
+        {'detail': 'Contraseña restablecida correctamente.'},
+        status=status.HTTP_200_OK,
+    )
 
 
 @swagger_auto_schema(tags=['Direcciones'])
 class DireccionesViewSet(viewsets.ModelViewSet):
     queryset = Direcciones.objects.all()
     serializer_class = DireccionesSerializer
+    permission_classes = [EsAdministrador]
+
 
 @swagger_auto_schema(tags=['Configuración Plantel'])
 class ConfiguracionPlantelViewSet(viewsets.ModelViewSet):
@@ -302,15 +251,20 @@ class ConfiguracionPlantelViewSet(viewsets.ModelViewSet):
     serializer_class = ConfiguracionPlantelSerializer
     permission_classes = [EsAdministrador]
 
-@swagger_auto_schema(tags=['Períodos Académicos'])
+
+@swagger_auto_schema(tags=['Periodos Académicos'])
 class PeriodosAcademicosViewSet(viewsets.ModelViewSet):
     queryset = PeriodosAcademicos.objects.all()
     serializer_class = PeriodosAcademicosSerializer
+    permission_classes = [EsAdministrador]
+
 
 @swagger_auto_schema(tags=['Niveles Educativos'])
 class NivelesEducativosViewSet(viewsets.ModelViewSet):
     queryset = NivelesEducativos.objects.all()
     serializer_class = NivelesEducativosSerializer
+    permission_classes = [EsAdministrador]
+
 
 @swagger_auto_schema(tags=['Turnos'])
 class TurnosViewSet(viewsets.ModelViewSet):
@@ -318,17 +272,20 @@ class TurnosViewSet(viewsets.ModelViewSet):
     serializer_class = TurnosSerializer
     permission_classes = [EsAdministrador]
 
+
 @swagger_auto_schema(tags=['Grados Académicos'])
 class GradosAcademicosViewSet(viewsets.ModelViewSet):
     queryset = GradosAcademicos.objects.select_related('id_nivel').all()
     serializer_class = GradosAcademicosSerializer
     permission_classes = [EsAdministrador]
 
+
 @swagger_auto_schema(tags=['Secciones'])
 class SeccionesViewSet(viewsets.ModelViewSet):
     queryset = Secciones.objects.all()
     serializer_class = SeccionesSerializer
     permission_classes = [EsAdministrador]
+
 
 @swagger_auto_schema(tags=['Usuarios'])
 class UsuariosViewSet(viewsets.ModelViewSet):
@@ -375,3 +332,45 @@ class UsuariosViewSet(viewsets.ModelViewSet):
         usuario.set_password(serializer.validated_data['contrasena_nueva'])
         usuario.save(update_fields=['clave_hash'])
         return Response({'detail': 'Contraseña actualizada correctamente.'})
+
+
+@swagger_auto_schema(tags=['Configuración Asistencia Pública'])
+class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
+    """CRUD para la configuración de enlace público de asistencia.
+    Sólo admin (staff) puede crear/editar. Lectura pública restringida a usuarios autenticados.
+    """
+    queryset = ConfiguracionAsistenciaPublica.objects.all()
+    serializer_class = ConfiguracionAsistenciaPublicaSerializer
+    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+
+
+@swagger_auto_schema(method='get', tags=['Asistencia Pública'])
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def asistencia_publica_link(request):
+    """Endpoint público que devuelve el enlace activo del día.
+    - Busca la configuración de hoy marcada como `activo=True`.
+    - Si no hay ninguna, responde 404.
+    - Retorna la URL completa (frontend + token) y el token.
+    """
+    today = timezone.localdate()
+    try:
+        config = ConfiguracionAsistenciaPublica.objects.get(fecha_dia=today, activo=True)
+    except ConfiguracionAsistenciaPublica.DoesNotExist:
+        return Response({'detail': 'No hay enlace activo para hoy'}, status=404)
+
+    public_url = f"{settings.FRONTEND_URL.rstrip('/')}/asistencia/{config.token_acceso}"
+    return Response({
+        'url': public_url,
+        'token': config.token_acceso,
+        'fecha_dia': config.fecha_dia,
+    })
+
+
+@swagger_auto_schema(method='get', tags=['Asistencia Pública'])
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def asistencia_publica_redirect(request, token):
+    """Redirige al frontend a la página de toma de asistencia pública."""
+    public_url = f"{settings.FRONTEND_URL.rstrip('/')}/asistencia/{token}"
+    return redirect(public_url)
