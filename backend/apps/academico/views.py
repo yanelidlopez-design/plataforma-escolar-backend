@@ -19,6 +19,7 @@ from .models import (
     Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias,
     PeriodoInscripcion, PeriodoCalificacion, CriterioEvaluacion,
     CriterioPeriodo, EvaluacionLapsoCriterio, AprendizajeAlcanzado,
+    ConfiguracionAsistenciaPublica,
 )
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
@@ -2372,11 +2373,14 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
     def alternar_estado(self, request):
         """
         Alterna el estado activo/inactivo de la configuración de asistencia pública.
-        Si no existe ninguna configuración, la crea con activo=True.
+        Si no existe ninguna configuración para hoy, la crea con activo=True.
         """
-        config = ConfiguracionAsistenciaPublica.objects.first()
+        today = timezone.localdate()
+        config = ConfiguracionAsistenciaPublica.objects.filter(fecha_dia=today).first()
         if not config:
-            config = ConfiguracionAsistenciaPublica.objects.create(activo=True)
+            config = ConfiguracionAsistenciaPublica.objects.first()
+        if not config:
+            config = ConfiguracionAsistenciaPublica.objects.create(fecha_dia=today, activo=True)
         else:
             config.activo = not config.activo
             config.save()
@@ -2390,9 +2394,12 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
         Regenera el token_acceso de la configuración de asistencia pública.
         Si no existe, la crea con un nuevo token.
         """
-        config = ConfiguracionAsistenciaPublica.objects.first()
+        today = timezone.localdate()
+        config = ConfiguracionAsistenciaPublica.objects.filter(fecha_dia=today).first()
         if not config:
-            config = ConfiguracionAsistenciaPublica.objects.create(activo=False)
+            config = ConfiguracionAsistenciaPublica.objects.first()
+        if not config:
+            config = ConfiguracionAsistenciaPublica.objects.create(fecha_dia=today, activo=False)
         config.token_acceso = secrets.token_urlsafe(32)
         config.save()
 
