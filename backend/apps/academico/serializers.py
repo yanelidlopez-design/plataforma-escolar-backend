@@ -27,25 +27,7 @@ from apps.academico.services import CalificacionesService
 logger = logging.getLogger(__name__)
 
 
-class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ConfiguracionAsistenciaPublica
-        fields = (
-            "id_config",
-            "activo",
-            "token_acceso",
-            "fecha_dia",
-            "fecha_vigencia_inicio",
-            "fecha_vigencia_fin",
-            "fecha_creacion",
-        )
-        read_only_fields = (
-            "fecha_vigencia_inicio",
-            "fecha_vigencia_fin",
-            "fecha_creacion",
-            "token_acceso",
-        )
-
+class RepresentanteAnidadoSerializer(serializers.Serializer):
     """
     Datos del representante legal anidados dentro de la creación de un alumno.
     JSON conceptual:
@@ -69,6 +51,26 @@ class DireccionAnidadaSerializer(serializers.Serializer):
     ciudad = serializers.CharField(max_length=100, required=True)
     estado = serializers.CharField(max_length=100, required=True)
     referencia = serializers.CharField(required=False, allow_null=True, allow_blank=True, default='')
+
+
+class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfiguracionAsistenciaPublica
+        fields = (
+            "id_config",
+            "activo",
+            "token_acceso",
+            "fecha_dia",
+            "fecha_vigencia_inicio",
+            "fecha_vigencia_fin",
+            "fecha_creacion",
+        )
+        read_only_fields = (
+            "fecha_vigencia_inicio",
+            "fecha_vigencia_fin",
+            "fecha_creacion",
+            "token_acceso",
+        )
 
 
 class AlumnosSerializer(serializers.ModelSerializer):
