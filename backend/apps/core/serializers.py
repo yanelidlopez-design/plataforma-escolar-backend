@@ -175,12 +175,27 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 class CustomBackend(ModelBackend):
+    """
+    Backend de autenticación personalizado que trabaja con el modelo Usuarios
+    (core.Usuarios) en lugar de auth.User.
+    """
     def authenticate(self, request, username=None, password=None, **kwargs):
         try:
-            user = User.objects.get(**{User.USERNAME_FIELD: username})
+            # USERNAME_FIELD para Usuarios es 'nombre_usuario' o 'email'
+            user = None
+            if username:
+                # Primero intentar por nombre_usuario
+                try:
+                    user = Usuarios.objects.get(nombre_usuario=username)
+                except Usuarios.DoesNotExist:
+                    # Si no, intentar por email
+                    try:
+                        user = Usuarios.objects.get(email=username)
+                    except Usuarios.DoesNotExist:
+                        user = None
         except ObjectDoesNotExist:
             return None
 
-        if user.check_password(password) and self.user_can_authenticate(user):
+        if user and user.check_password(password) and user.activo and self.user_can_authenticate(user):
             return user
         return None

@@ -1,4 +1,57 @@
 from django.db import models
+from django.contrib.auth.models import BaseUserManager
+
+
+class UsuariosManager(BaseUserManager):
+    """
+    Manager personalizado para el modelo Usuarios.
+    Hereda de BaseUserManager para obtener los métodos requeridos por Django
+    como create_user, create_superuser y get_by_natural_key.
+    """
+    use_in_migrate = True
+
+    def create_user(self, nombre_usuario, email, clave_hash=None, rol='profesor', activo=True, password=None, **extra_fields):
+        """
+        Crea y guarda un usuario normal.
+        """
+        if not nombre_usuario:
+            raise ValueError('El nombre de usuario es obligatorio')
+        if not email:
+            raise ValueError('El correo electrónico es obligatorio')
+        email = self.normalize_email(email)
+        usuario = self.model(
+            nombre_usuario=nombre_usuario,
+            email=email,
+            rol=rol,
+            activo=activo,
+            **extra_fields
+        )
+        # Establecer la contraseña si se proporciona
+        if password:
+            usuario.set_password(password)
+        else:
+            usuario.set_password(clave_hash) if clave_hash else None
+        usuario.save(using=self._db)
+        return usuario
+
+    def create_superuser(self, nombre_usuario, email, clave_hash=None, rol='admin', password=None, **extra_fields):
+        """
+        Crea y guarda un superusuario.
+        """
+        usuario = self.create_user(
+            nombre_usuario=nombre_usuario,
+            email=email,
+            clave_hash=clave_hash,
+            rol=rol,
+            activo=True,
+            password=password,
+            **extra_fields
+        )
+        usuario.is_staff = True
+        usuario.is_superuser = True
+        usuario.save(using=self._db)
+        return usuario
+
 
 class Direcciones(models.Model):
     id_direccion = models.AutoField(primary_key=True, db_column='id_direccion')
@@ -129,6 +182,8 @@ class Usuarios(models.Model):
     activo = models.BooleanField(default=True, db_column='activo')
     fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
 
+    objects = UsuariosManager()
+
     class Meta:
         managed = False
         db_table = 'usuarios'
@@ -153,6 +208,10 @@ class Usuarios(models.Model):
     @property
     def is_active(self):
         return self.activo
+
+    @property
+    def is_staff(self):
+        return self.rol == 'admin'
 
     @property
     def id(self):

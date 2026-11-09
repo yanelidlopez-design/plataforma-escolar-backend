@@ -40,6 +40,7 @@ export default function Sidebar({
     { path: '/admin/dashboard/asistencia', icon: Clock, label: 'Asistencia' },
     { path: '/admin/dashboard/calificaciones', icon: FileText, label: 'Calificaciones' },
     { path: '/admin/dashboard/configuracion-urls', icon: ShieldAlert, label: 'Config. Enlaces' },
+    { path: '/admin/dashboard/configuracion-enlace', icon: Link, label: 'Conf. Enlace' },
     { path: '/admin/dashboard/reportes', icon: BarChart3, label: 'Reportes' },
   ];
 

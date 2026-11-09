@@ -7,6 +7,7 @@ import Personal from './pages/Personal';
 import Asistencia from './pages/Asistencia';
 import Calificaciones from './pages/Calificaciones';
 import ConfiguracionUrls from './pages/ConfiguracionUrls';
+import ConfiguracionEnlace from './pages/ConfiguracionEnlace';
 import Reportes from './pages/Reportes';
 import Login from './pages/Login';
 import RecuperarContrasena from './pages/RecuperarContrasena';
@@ -54,6 +55,7 @@ function App() {
         <Route path="asistencia" element={<Asistencia />} />
         <Route path="calificaciones" element={<Calificaciones />} />
         <Route path="configuracion-urls" element={<ConfiguracionUrls />} />
+        <Route path="configuracion-enlace" element={<ConfiguracionEnlace />} />
         <Route path="reportes" element={<Reportes />} />
       </Route>
 
