@@ -57,7 +57,7 @@ class AsistenciaPublicaLinkViewTest(TestCase):
             fecha_dia=today,
             activo=True,
         )
-        response = self.client.get('/api/asistencia/link/')
+        response = self.client.get('/api/core/asistencia/link/')
         self.assertEqual(response.status_code, 200)
         data = response.json()
         expected_url = f"{self.frontend_url.rstrip('/')}/asistencia/{cfg.token_acceso}"
@@ -66,6 +66,6 @@ class AsistenciaPublicaLinkViewTest(TestCase):
         self.assertEqual(data['fecha_dia'], str(today))
 
     def test_link_returns_404_when_no_active(self):
-        response = self.client.get('/api/asistencia/link/')
+        response = self.client.get('/api/core/asistencia/link/')
         self.assertEqual(response.status_code, 404)
         self.assertIn('No hay enlace activo para hoy', response.json().get('detail', ''))
