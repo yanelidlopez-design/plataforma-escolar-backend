@@ -1,29 +1,69 @@
 """
 Test settings for pytest - uses SQLite database (a temporary file, not :memory:).
 
-Notas importantes sobre el entorno de pruebas:
-- `django.contrib.admin` se desactiva: su tabla `django_admin_log` declara una FK
-  al `AUTH_USER_MODEL` (`core.Usuarios`, tabla `usuarios`), pero ese modelo está
-  marcado como `managed = False` así que Django nunca crea la tabla `usuarios` en
-  `migrate`. En SQLite eso provoca `foreign key mismatch` al insertar en
-  `django_admin_log`. Ningún test de la suite usa el admin, por lo que es seguro
-  excluirlo de las pruebas.
-- Se usa un archivo temporal (no `:memory:`) para que la BD persista entre las
-  distintas conexiones que abre Django/pytest-django y evitar que las tablas
-  creadas en `migrate` desaparezcan al cerrar una conexión.
+Este archivo es COMPLETAMENTE INDEPENDIENTE de settings.py para evitar problemas
+con MySQL en el entorno de CI/CD. No importa de .settings para prevenir errores
+de conexión a base de datos remota.
 """
-from .settings import *
 
 import os
 import tempfile
 
-# django.contrib.admin genera django_admin_log (FK a usuarios, managed=False).
-# Se excluye de INSTALLED_APPS solo para el entorno de test. Como urls.py
-# referencia admin.site.urls, se usa un ROOT_URLCONF de test sin esa ruta.
-INSTALLED_APPS = [app for app in INSTALLED_APPS if app != 'django.contrib.admin']
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+SECRET_KEY = os.environ.get('SECRET_KEY', 'test-secret-key-ci')
+DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+
+INSTALLED_APPS = [
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'django.contrib.admin',  # Necesario para las URLs aunque managed=False
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'drf_yasg',
+    'corsheaders',
+    'django_q',
+    'apps.core',
+    'apps.personal',
+    'apps.academico',
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
 ROOT_URLCONF = 'config.urls_test'
 
-# Override database to use SQLite for tests (temporary file, shared across connections)
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = 'config.wsgi.application'
+
+# SQLite para tests - archivo temporal compartido entre conexiones
 TEST_DB_NAME = os.environ.get(
     'TEST_DB_NAME',
     os.path.join(tempfile.gettempdir(), 'plataforma_test.sqlite3'),
@@ -36,13 +76,49 @@ DATABASES = {
     }
 }
 
-# Disable debug mode for tests
-DEBUG = False
-
-# Use a simple password hasher for faster tests
+# Password hashing rápido para tests
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.MD5PasswordHasher',
 ]
 
-# Desactiva el broker de tareas asíncronas en tests (no se necesita django-q2).
+# Internacionalización
+LANGUAGE_CODE = 'es-es'
+TIME_ZONE = 'America/Caracas'
+USE_I18N = True
+USE_TZ = True
+
+# Archivos estáticos
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Django Q desactivado en tests
 Q_CLUSTER = {}
+
+# Emails en consola para tests
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}
+
+# JWT
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}
+
+# Modelo de usuario personalizado
+AUTH_USER_MODEL = 'core.Usuarios'
+
+# URLs de test (sin admin para evitar FK mismatch)
+ROOT_URLCONF = 'config.urls_test'
