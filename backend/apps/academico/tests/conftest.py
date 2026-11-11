@@ -37,14 +37,29 @@ MODELOS_LEGACY = [
 def tablas_legacy(transactional_db):
     """Crea las tablas legacy necesarias para los tests que escriben en BD."""
     existentes = connection.introspection.table_names()
-    with connection.schema_editor() as schema_editor:
-        for modelo in MODELOS_LEGACY:
-            if modelo._meta.db_table not in existentes:
-                schema_editor.create_model(modelo)
+    # Desactivar FK constraints de SQLite para evitar foreign key mismatch
+    # al crear tablas legacy (managed=False) que referencia django_admin_log.
+    with connection.cursor() as cursor:
+        cursor.execute('PRAGMA foreign_keys = OFF')  # nosec B608
+    try:
+        with connection.schema_editor() as schema_editor:
+            for modelo in MODELOS_LEGACY:
+                if modelo._meta.db_table not in existentes:
+                    schema_editor.create_model(modelo)
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute('PRAGMA foreign_keys = ON')  # nosec B608
+
     # transactional_db no hace rollback: limpia los datos del test anterior.
     # SQL crudo en orden inverso: .delete() del ORM usaría el collector y
     # consultaría tablas legacy que no existen (inscripciones, notas...).
-    for modelo in reversed(MODELOS_LEGACY):
+    with connection.cursor() as cursor:
+        cursor.execute('PRAGMA foreign_keys = OFF')  # nosec B608
+    try:
+        for modelo in reversed(MODELOS_LEGACY):
+            with connection.cursor() as cursor:
+                cursor.execute(f'DELETE FROM "{modelo._meta.db_table}"')  # nosec B608
+    finally:
         with connection.cursor() as cursor:
-            cursor.execute(f'DELETE FROM "{modelo._meta.db_table}"')  # nosec B608
+            cursor.execute('PRAGMA foreign_keys = ON')  # nosec B608
     yield

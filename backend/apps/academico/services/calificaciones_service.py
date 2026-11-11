@@ -506,7 +506,10 @@ class CalificacionesService:
 
             # Obtener representante principal
             representante_principal = None
-            rep_vinculado = alumno.representantes_vinculados.filter(es_principal=True).first()
+            try:
+                rep_vinculado = alumno.representantes_vinculados.filter(es_principal=True).first()
+            except Alumnos.representantes_vinculados.RelatedObjectDoesNotExist:
+                rep_vinculado = None
             if rep_vinculado and rep_vinculado.representante:
                 rep = rep_vinculado.representante
                 representante_principal = f"{rep.primer_nombre} {rep.primer_apellido}".strip()
