@@ -122,3 +122,7 @@ AUTH_USER_MODEL = 'core.Usuarios'
 
 # URLs de test (sin admin para evitar FK mismatch)
 ROOT_URLCONF = 'config.urls_test'
+
+# Frontend dist directory (para URLs de prueba)
+from pathlib import Path
+FRONTEND_DIST_DIR = Path("frontend/dist")

@@ -44,7 +44,7 @@ if settings.DEBUG:
         path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     ]
 
-if settings.FRONTEND_DIST_DIR.is_dir():
+if hasattr(settings, 'FRONTEND_DIST_DIR') and settings.FRONTEND_DIST_DIR.is_dir():
     urlpatterns += [
         re_path(
             r'^(?!api(?:/|$)|admin(?:/|$)|static(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
