@@ -1,0 +1,9 @@
+name: Web Search MCP
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: fetch-mcp
+    command: /usr/bin/npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-fetch"

@@ -41,6 +41,7 @@ from apps.core.models import (
     PeriodosAcademicos,
     Secciones,
     Turnos,
+    Usuarios,
 )
 from apps.academico.services.periodo_acceso_service import (
     PeriodoCerradoError,
@@ -88,23 +89,35 @@ def tablas_grupos(transactional_db):
 
 @pytest.fixture
 def tabla_aprendizaje_criterio(tablas_legacy, tablas_grupos):
-    """Completa en SQLite la columna legacy usada para preservar evaluaciones."""
+    """Crea/completa la tabla AprendizajeAlcanzado en SQLite para los tests de carga masiva.
+
+    Agrega todas las columnas del modelo que falten en la tabla (no solo
+    ``criterio``), porque el servicio de carga masiva escribe ``sugerencias``,
+    ``indicador``, ``texto`` y ``orden`` además de ``id_criterio``.
+    """
     modelo = AprendizajeAlcanzado
-    columnas = {
+    columnas_existentes = {
         columna.name
         for columna in connection.introspection.get_table_description(
             connection.cursor(), modelo._meta.db_table,
         )
     }
-    campo = modelo._meta.get_field('criterio')
-    agregada = campo.column not in columnas
-    if agregada:
-        with connection.schema_editor() as schema_editor:
-            schema_editor.add_field(modelo, campo)
+    campos_agregados = []
+    with connection.schema_editor() as schema_editor:
+        for campo in modelo._meta.local_fields:
+            if campo.name == 'id':
+                continue  # PK auto: ya existe o la BD la gestiona
+            if campo.column not in columnas_existentes:
+                schema_editor.add_field(modelo, campo)
+                campos_agregados.append(campo)
     yield
-    if agregada:
-        with connection.schema_editor() as schema_editor:
-            schema_editor.remove_field(modelo, campo)
+    # Teardown: remover los campos que agregamos (en orden inverso, best-effort)
+    with connection.schema_editor() as schema_editor:
+        for campo in reversed(campos_agregados):
+            try:
+                schema_editor.remove_field(modelo, campo)
+            except Exception:
+                pass
 
 
 @pytest.fixture
@@ -213,11 +226,14 @@ def test_criterios_admin_se_configuran_por_seccion_y_periodo(
     api_client, periodo_abierto, tabla_aprendizaje_criterio,
 ):
     grupo = _crear_grupo('Educación Primaria', 'Primer Grado')
-    administrador = get_user_model().objects.create_superuser(
-        username=f'admin-{uuid4().hex[:8]}',
+    administrador = Usuarios.objects.create(
+        nombre_usuario=f'admin-{uuid4().hex[:8]}',
         email=f'{uuid4().hex[:8]}@example.com',
-        password='test-password',
+        rol='admin',
+        activo=True,
     )
+    administrador.set_password('test-password')
+    administrador.save()
     api_client.force_authenticate(administrador)
     endpoint = _url_criterios_admin()
 
@@ -276,11 +292,14 @@ def test_criterio_calificado_no_se_puede_retirar_del_periodo(
     api_client, periodo_abierto, tabla_aprendizaje_criterio,
 ):
     grupo = _crear_grupo('Educación Primaria', 'Primer Grado')
-    administrador = get_user_model().objects.create_superuser(
-        username=f'admin-{uuid4().hex[:8]}',
+    administrador = Usuarios.objects.create(
+        nombre_usuario=f'admin-{uuid4().hex[:8]}',
         email=f'{uuid4().hex[:8]}@example.com',
-        password='test-password',
+        rol='admin',
+        activo=True,
     )
+    administrador.set_password('test-password')
+    administrador.save()
     api_client.force_authenticate(administrador)
     criterio = CriterioEvaluacion.objects.create(
         grupo=grupo,

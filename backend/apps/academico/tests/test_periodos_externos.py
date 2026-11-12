@@ -117,12 +117,14 @@ def api_client():
 @pytest.fixture
 def usuario_admin():
     """Usuario de prueba para autenticación en el switch administrativo."""
-    usuario = Usuarios.objects.create(
+    usuario, _ = Usuarios.objects.get_or_create(
         nombre_usuario='admin_test',
-        clave_hash='pbkdf2_sha256$260000$test$testhash',
-        email='admin@test.com',
-        rol='admin',
-        activo=True,
+        defaults={
+            'clave_hash': 'pbkdf2_sha256$260000$test$testhash',
+            'email': 'admin@test.com',
+            'rol': 'admin',
+            'activo': True,
+        },
     )
     return usuario
 

@@ -218,7 +218,7 @@ def confirmar_restauracion_contrasena(request):
         usuario = Usuarios.objects.get(pk=uid, activo=True)
     except (TypeError, ValueError, OverflowError, Usuarios.DoesNotExist):
         return Response(
-            {'detail': 'El enlace de recuperación es inválido o expiró.'},
+            {'token': ['El enlace no es válido o ha expirado.']},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -226,11 +226,11 @@ def confirmar_restauracion_contrasena(request):
         usuario, serializer.validated_data['token']
     ):
         return Response(
-            {'detail': 'El enlace de recuperación es inválido o expiró.'},
+            {'token': ['El enlace no es válido o ha expirado.']},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    usuario.set_password(serializer.validated_data['nueva_contrasena'])
+    usuario.set_password(serializer.validated_data['contrasena_nueva'])
     usuario.save(update_fields=['clave_hash'])
     return Response(
         {'detail': 'Contraseña restablecida correctamente.'},

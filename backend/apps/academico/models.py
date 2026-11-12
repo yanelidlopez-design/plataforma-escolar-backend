@@ -564,10 +564,10 @@ class ConfiguracionAsistenciaPublica(models.Model):
 
     id_config = models.AutoField(primary_key=True, db_column='id_config')
     activo = models.BooleanField(default=False, db_column='activo')
-    token_acceso = models.CharField(max_length=255, unique=True, db_column='token_acceso')
+    token_acceso = models.CharField(max_length=255, unique=True, db_column='token_acceso', blank=True)
     fecha_dia = models.DateField(unique=True, db_column='fecha_dia')
-    fecha_vigencia_inicio = models.DateTimeField(db_column='fecha_vigencia_inicio')
-    fecha_vigencia_fin = models.DateTimeField(db_column='fecha_vigencia_fin')
+    fecha_vigencia_inicio = models.DateTimeField(db_column='fecha_vigencia_inicio', blank=True)
+    fecha_vigencia_fin = models.DateTimeField(db_column='fecha_vigencia_fin', blank=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True, db_column='fecha_creacion')
 
     class Meta:
@@ -583,6 +583,7 @@ class ConfiguracionAsistenciaPublica(models.Model):
         - La vigencia siempre es de 24 horas comenzando a las 07:00 del día indicado.
         """
         from datetime import datetime, time, timedelta
+        from django.conf import settings
         from django.utils import timezone
 
         if not self.fecha_dia:
@@ -592,9 +593,10 @@ class ConfiguracionAsistenciaPublica(models.Model):
         if self.fecha_dia.weekday() > 4:
             raise ValidationError('La configuración solo puede crearse de lunes a viernes.')
 
-        # Calcular inicio y fin de vigencia
+        # Calcular inicio y fin de vigencia (respetando USE_TZ para SQLite en tests)
         inicio = datetime.combine(self.fecha_dia, time(hour=7, minute=0))
-        inicio = timezone.make_aware(inicio) if timezone.is_naive(inicio) else inicio
+        if settings.USE_TZ and timezone.is_naive(inicio):
+            inicio = timezone.make_aware(inicio)
         fin = inicio + timedelta(hours=24)
         self.fecha_vigencia_inicio = inicio
         self.fecha_vigencia_fin = fin
