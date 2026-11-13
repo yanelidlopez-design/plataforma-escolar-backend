@@ -267,9 +267,9 @@ djangorestframework-simplejwt==5.5.1 \
     --hash=sha256:2c30f3707053d384e9f315d11c2daccfcb548d4faa453111ca19a542b732e469 \
     --hash=sha256:e72c5572f51d7803021288e2057afcbd03f17fe11d484096f40a460abc76e87f
     # via -r requirements.in
-drf-yasg==1.21.15 \
-    --hash=sha256:7c7a7ab9feb0e13cdd6e25147d99adb0500a68bd96509ffd8f8cf7efd4bdc77e \
-    --hash=sha256:ef86838c4ef10dcd3ac1ebf2be601cbe02978b999671caa43667f7c9db961468
+drf-yasg==1.21.18 \
+    --hash=sha256:c93b1395da8f3b912085c96b45f561b6c5d6326825ea0040761bc8c744acba52 \
+    --hash=sha256:eb26c56bc7e71e7098a817660c7d8e83b858b16e372864218de29bb06d681611
     # via -r requirements.in
 et-xmlfile==2.0.0 \
     --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa \
