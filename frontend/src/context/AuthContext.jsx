@@ -38,7 +38,7 @@ export function AuthProvider({ children }) {
 
   const login = async ({ nombre_usuario, password }) => {
     const response = await axios.post('/api/core/token/', {
-      username: nombre_usuario,
+      nombre_usuario,
       password,
     });
     const { access, refresh } = response.data;
