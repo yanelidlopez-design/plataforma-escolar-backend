@@ -1,4 +1,5 @@
 import datetime
+from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.core.management import call_command
@@ -52,18 +53,24 @@ class AsistenciaPublicaLinkViewTest(TestCase):
         self.override.disable()
 
     def test_link_returns_active_configuration(self):
-        today = timezone.localdate()
-        cfg = ConfiguracionAsistenciaPublica.objects.create(
-            fecha_dia=today,
-            activo=True,
-        )
-        response = self.client.get('/api/core/asistencia/link/')
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        expected_url = f"{self.frontend_url.rstrip('/')}/asistencia/{cfg.token_acceso}"
-        self.assertEqual(data['url'], expected_url)
-        self.assertEqual(data['token'], cfg.token_acceso)
-        self.assertEqual(data['fecha_dia'], str(today))
+        # Simular un día laborable (miércoles 2026-11-04) para evitar la
+        # validación del modelo que rechaza fines de semana.
+        # Se parchea timezone.localdate tanto para la creación como para
+        # la consulta del enlace activo en la vista.
+        wednesday = datetime.date(2026, 11, 4)  # weekday=2 (miércoles)
+        with patch('django.utils.timezone.localdate', return_value=wednesday):
+            today = timezone.localdate()
+            cfg = ConfiguracionAsistenciaPublica.objects.create(
+                fecha_dia=today,
+                activo=True,
+            )
+            response = self.client.get('/api/core/asistencia/link/')
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            expected_url = f"{self.frontend_url.rstrip('/')}/asistencia/{cfg.token_acceso}"
+            self.assertEqual(data['url'], expected_url)
+            self.assertEqual(data['token'], cfg.token_acceso)
+            self.assertEqual(data['fecha_dia'], str(today))
 
     def test_link_returns_404_when_no_active(self):
         response = self.client.get('/api/core/asistencia/link/')
