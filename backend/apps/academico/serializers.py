@@ -227,7 +227,13 @@ class AlumnosSerializer(serializers.ModelSerializer):
         alumno.representante.cedula / alumno.representante.nombre / alumno.parentesco
         """
         data = super().to_representation(instance)
-        relacion = instance.representantes_vinculados.first()
+
+        # representantes_vinculados es OneToOneField reverse: devuelve el objeto
+        # directamente (no un manager con .first()). Si no existe, lanza DoesNotExist.
+        try:
+            relacion = instance.representantes_vinculados
+        except AlumnoRepresentante.DoesNotExist:
+            relacion = None
 
         if instance.id_direccion_residencia:
             dir_obj = instance.id_direccion_residencia
