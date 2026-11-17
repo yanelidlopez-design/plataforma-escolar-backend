@@ -16,6 +16,7 @@ from .models import (
     EvaluacionLapsoCriterio,
     ConstanciaProsecucionFinal,
     ConfiguracionAsistenciaPublica,
+    ConfiguracionInstitucional,
 )
 from apps.core.serializers import DireccionesSerializer, PeriodosAcademicosSerializer, GradosAcademicosSerializer, SeccionesSerializer, TurnosSerializer
 from apps.core.models import Direcciones
@@ -71,6 +72,30 @@ class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
             "fecha_creacion",
             "token_acceso",
         )
+
+
+class ConfiguracionInstitucionalSerializer(serializers.ModelSerializer):
+    """
+    Datos institucionales y de dirección para la generación de
+    Constancias de Procesión en el Nivel de Educación Primaria.
+    Singleton: solo existe un registro (pk=1).
+    """
+
+    class Meta:
+        model = ConfiguracionInstitucional
+        fields = (
+            'id_configuracion',
+            'nombre_institucion',
+            'municipio',
+            'parroquia',
+            'cdce_estadal',
+            'director_institucion_nombre',
+            'director_institucion_cedula',
+            'director_cdce_nombre',
+            'director_cdce_cedula',
+            'fecha_actualizacion',
+        )
+        read_only_fields = ('id_configuracion', 'fecha_actualizacion')
 
 
 class AlumnosSerializer(serializers.ModelSerializer):
@@ -1064,7 +1089,7 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ConstanciaProsecucionFinal
-        fields = ['id', 'alumno', 'periodo_escolar', 'literal_final', 'promovido_al_grado']
+        fields = ['id', 'alumno', 'periodo_escolar', 'literal_final', 'promovido_al_grado', 'grado_cursado', 'lugar_expedicion']
 
     def create(self, validated_data):
         # Auditoría: la unicidad (alumno + periodo) puede fallar por una

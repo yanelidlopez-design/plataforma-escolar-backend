@@ -20,6 +20,7 @@ from .models import (
     PeriodoInscripcion, PeriodoCalificacion, CriterioEvaluacion,
     CriterioPeriodo, EvaluacionLapsoCriterio, AprendizajeAlcanzado,
     ConfiguracionAsistenciaPublica,
+    ConfiguracionInstitucional,
 )
 from .serializers import (
     AlumnosSerializer, GruposAcademicosSerializer,
@@ -30,6 +31,7 @@ from .serializers import (
     CargaMasivaCalificacionesSerializer,
     CargaMasivaCriteriosSerializer,
     ConstanciaProsecucionFinalSerializer,
+    ConfiguracionInstitucionalSerializer,
     GrupoPublicoSerializer,
     AlumnoPublicoSerializer,
     RegistroAsistenciaInputSerializer,
@@ -2405,3 +2407,163 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(config)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ConfiguracionInstitucionalAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        config = ConfiguracionInstitucional.get_solo()
+        serializer = ConfiguracionInstitucionalSerializer(config)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        serializer = ConfiguracionInstitucionalSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {'success': True, 'configuracion': serializer.data},
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            {'success': False, 'errors': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def put(self, request, *args, **kwargs):
+        config = ConfiguracionInstitucional.get_solo()
+        serializer = ConfiguracionInstitucionalSerializer(config, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {'success': True, 'configuracion': serializer.data},
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            {'success': False, 'errors': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class ConstanciaProsecucionAlumnoAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, alumno_id, *args, **kwargs):
+        try:
+            alumno = Alumnos.objects.get(pk=alumno_id)
+        except Alumnos.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        periodo = request.query_params.get('periodo_escolar', '')
+        queryset = ConstanciaProsecucionFinal.objects.filter(alumno=alumno)
+        if periodo:
+            queryset = queryset.filter(periodo_escolar=periodo)
+        constancia = queryset.first()
+
+        if constancia is None:
+            return Response(
+                {'success': False, 'error': 'No hay constancia de prosecución registrada para este alumno.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = ConstanciaProsecucionFinalSerializer(constancia)
+        return Response(
+            {'success': True, 'constancia': serializer.data},
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, alumno_id, *args, **kwargs):
+        try:
+            alumno = Alumnos.objects.get(pk=alumno_id)
+        except Alumnos.DoesNotExist:
+            return Response(
+                {'success': False, 'error': 'Alumno no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        periodo = request.data.get('periodo_escolar', '')
+        if not periodo:
+            return Response(
+                {'success': False, 'error': 'periodo_escolar es requerido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        constancia, created = ConstanciaProsecucionFinal.objects.update_or_create(
+            alumno=alumno,
+            periodo_escolar=periodo,
+            defaults={
+                'literal_final': request.data.get('literal_final', ''),
+                'promovido_al_grado': request.data.get('promovido_al_grado', ''),
+                'grado_cursado': request.data.get('grado_cursado', ''),
+                'lugar_expedicion': request.data.get('lugar_expedicion', ''),
+            },
+        )
+
+        serializer = ConstanciaProsecucionFinalSerializer(constancia)
+        return Response(
+            {
+                'success': True,
+                'constancia': serializer.data,
+                'created': created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ExportarConstanciasLoteAPIView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        grado_id = request.query_params.get('grado')
+        seccion_id = request.query_params.get('seccion')
+        periodo = request.query_params.get('periodo', '')
+
+        if not grado_id or not seccion_id:
+            return Response(
+                {'success': False, 'error': 'grado y seccion son requeridos.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            grupos = GruposAcademicos.objects.select_related(
+                'grado', 'seccion'
+            ).filter(
+                grado_id=grado_id,
+                seccion_id=seccion_id,
+            )
+
+            if periodo:
+                constancias = ConstanciaProsecucionFinal.objects.filter(
+                    alumno__inscripciones__grupo__in=grupos,
+                    periodo_escolar=periodo,
+                ).distinct()
+            else:
+                constancias = ConstanciaProsecucionFinal.objects.filter(
+                    alumno__inscripciones__grupo__in=grupos,
+                ).distinct()
+
+            if not constancias.exists():
+                return Response(
+                    {'success': False, 'error': 'No hay constancias de prosecución para el grado y sección seleccionados.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            pdf_buffer, filename = ReportesService.generar_constancias_lote_pdf(
+                constancias,
+            )
+
+            response = FileResponse(
+                pdf_buffer,
+                content_type='application/pdf',
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except ReporteError as exc:
+            return Response(
+                {'success': False, 'error': exc.message},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

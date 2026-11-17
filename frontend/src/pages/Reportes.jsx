@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, FileDown } from 'lucide-react';
+import { BarChart3, FileDown, Mail, GraduationCap } from 'lucide-react';
 import axiosInstance from '../api/axiosInstance';
 import { exportarEstadisticaMensualPDF } from '../api/asistencias';
+import { exportarConstanciasLotePDF } from '../api/prosecucion';
 import { downloadFile } from '../utils/downloadFile';
 
 const mesActual = () => {
@@ -31,7 +32,13 @@ export default function Reportes() {
   });
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [generando, setGenerando] = useState(false);
+  const [generandoLote, setGenerandoLote] = useState(false);
   const [error, setError] = useState('');
+  const [filtrosConstancia, setFiltrosConstancia] = useState({
+    periodo: '',
+    grado: '',
+    seccion: '',
+  });
 
   useEffect(() => {
     const cargarCatalogos = async () => {
@@ -87,18 +94,56 @@ export default function Reportes() {
       console.error('Error al generar la estadística mensual de asistencia:', reportError);
       let mensaje = reportError.message || 'No se pudo generar la estadística mensual.';
       if (reportError.response?.data instanceof Blob) {
-        try {
-          const detalle = JSON.parse(await reportError.response.data.text());
-          mensaje = detalle.detail || detalle.error || mensaje;
-        } catch (parseError) {
-          console.error('No se pudo leer el error devuelto al generar el reporte:', parseError);
-        }
+        reportError.response.data.text().then((texto) => {
+          try {
+            const detalle = JSON.parse(texto);
+            mensaje = detalle.detail || detalle.error || mensaje;
+          } catch (parseError) {
+            console.error('No se pudo leer el error:', parseError);
+          }
+          setError(mensaje);
+        }).catch(() => setError(mensaje));
       } else {
-        mensaje = reportError.response?.data?.detail || mensaje;
+        setError(mensaje);
       }
-      setError(mensaje);
     } finally {
       setGenerando(false);
+    }
+  };
+
+  const handleExportarConstanciasLote = async () => {
+    if (!filtrosConstancia.periodo || !filtrosConstancia.grado || !filtrosConstancia.seccion) {
+      setError('Selecciona período, grado y sección.');
+      return;
+    }
+    setGenerandoLote(true);
+    setError('');
+    try {
+      const response = await exportarConstanciasLotePDF({
+        grado: filtrosConstancia.grado,
+        seccion: filtrosConstancia.seccion,
+        periodo: filtrosConstancia.periodo,
+      });
+      const filename = `constancias_procesion_${filtrosConstancia.periodo}_grado${filtrosConstancia.grado}_sec${filtrosConstancia.seccion}.pdf`;
+      await downloadFile(response, filename);
+    } catch (reportError) {
+      console.error('Error al exportar constancias en lote:', reportError);
+      let mensaje = reportError.message || 'No se pudo exportar las constancias.';
+      if (reportError.response?.data instanceof Blob) {
+        reportError.response.data.text().then((texto) => {
+          try {
+            const detalle = JSON.parse(texto);
+            mensaje = detalle.detail || detalle.error || mensaje;
+          } catch (parseError) {
+            // Ignorar error de parseo
+          }
+          setError(mensaje);
+        }).catch(() => setError(mensaje));
+      } else {
+        setError(mensaje);
+      }
+    } finally {
+      setGenerandoLote(false);
     }
   };
 
@@ -204,6 +249,97 @@ export default function Reportes() {
             {generando ? 'Generando reporte...' : 'Descargar PDF'}
           </button>
         </div>
+      </section>
+
+      {/* Sección: Constancias de Procesión (Educación Primaria) */}
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6">
+        <div className="mb-5">
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <GraduationCap className="w-5 h-5 text-indigo-600" />
+            Constancias de Procesión (Educación Primaria)
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Genera un PDF multipágina con una constancia por estudiante del grado y sección seleccionados.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <div>
+            <label htmlFor="constancia-periodo" className="mb-1 block text-xs font-medium text-gray-700">
+              Período Escolar
+            </label>
+            <input
+              id="constancia-periodo"
+              type="text"
+              value={filtrosConstancia.periodo}
+              onChange={(event) => setFiltrosConstancia({ ...filtrosConstancia, periodo: event.target.value })}
+              placeholder="Ej: 2025-2026"
+              className="input-field"
+              disabled={cargandoCatalogos}
+            />
+          </div>
+          <div>
+            <label htmlFor="constancia-grado" className="mb-1 block text-xs font-medium text-gray-700">
+              Grado (1° a 5°)
+            </label>
+            <select
+              id="constancia-grado"
+              value={filtrosConstancia.grado}
+              onChange={(event) => setFiltrosConstancia({ ...filtrosConstancia, grado: event.target.value })}
+              className="select-field"
+              disabled={cargandoCatalogos}
+            >
+              <option value="">Selecciona grado</option>
+              {grados.map((grado) => (
+                <option key={grado.id_grado} value={grado.id_grado}>
+                  {grado.nombre_grado}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="constancia-seccion" className="mb-1 block text-xs font-medium text-gray-700">
+              Sección
+            </label>
+            <select
+              id="constancia-seccion"
+              value={filtrosConstancia.seccion}
+              onChange={(event) => setFiltrosConstancia({ ...filtrosConstancia, seccion: event.target.value })}
+              className="select-field"
+              disabled={cargandoCatalogos}
+            >
+              <option value="">Selecciona sección</option>
+              {secciones.map((seccion) => (
+                <option key={seccion.id_seccion} value={seccion.id_seccion}>
+                  {seccion.nombre_seccion}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleExportarConstanciasLote}
+              disabled={
+                cargandoCatalogos
+                || generandoLote
+                || !filtrosConstancia.periodo
+                || !filtrosConstancia.grado
+                || !filtrosConstancia.seccion
+              }
+              className="btn-primary flex items-center gap-2 w-full"
+            >
+              <Mail className="h-4 w-4" />
+              {generandoLote ? 'Generando...' : 'Exportar PDF Lote'}
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {error}
+          </div>
+        )}
       </section>
     </div>
   );

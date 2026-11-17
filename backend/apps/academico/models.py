@@ -535,6 +535,20 @@ class ConstanciaProsecucionFinal(models.Model):
         ],
         help_text='Letra final A-E.',
     )
+    grado_cursado = models.CharField(
+        max_length=50,
+        db_column='grado_cursado',
+        blank=True,
+        null=True,
+        help_text='Grado cursado (ej. "Primer", "Segundo", ..., "Quinto").',
+    )
+    lugar_expedicion = models.CharField(
+        max_length=100,
+        db_column='lugar_expedicion',
+        blank=True,
+        null=True,
+        help_text='Lugar de expedición de la constancia (ej. "Calabozo").',
+    )
     promovido_al_grado = models.CharField(
         max_length=50,
         db_column='promovido_al_grado',
@@ -612,4 +626,85 @@ class ConfiguracionAsistenciaPublica(models.Model):
 
     def __str__(self):
         return f'Asistencia Pública - {self.fecha_dia} - {"Activa" if self.activo else "Inactiva"}'
+
+
+class ConfiguracionInstitucional(models.Model):
+    """
+    Datos institucionales y de dirección para la generación de
+    Constancias de Prosecución en el Nivel de Educación Primaria.
+    Solo debe existir un registro (singleton) en la base de datos.
+    """
+
+    id_configuracion = models.AutoField(primary_key=True, db_column='id_configuracion')
+
+    nombre_institucion = models.CharField(
+        max_length=200,
+        db_column='nombre_institucion',
+        help_text='Nombre oficial de la Institución Educativa.',
+    )
+    municipio = models.CharField(
+        max_length=100,
+        db_column='municipio',
+        help_text='Municipio donde está ubicada la institución.',
+    )
+    parroquia = models.CharField(
+        max_length=100,
+        db_column='parroquia',
+        help_text='Parroquia donde está ubicada la institución.',
+    )
+    cdce_estadal = models.CharField(
+        max_length=200,
+        db_column='cdce_estadal',
+        help_text='Centro de Desarrollo de la Calidad Educativa Estadal.',
+    )
+
+    director_institucion_nombre = models.CharField(
+        max_length=200,
+        db_column='director_institucion_nombre',
+        help_text='Nombre completo del Director(a) de la Institución Educativa.',
+    )
+    director_institucion_cedula = models.CharField(
+        max_length=20,
+        db_column='director_institucion_cedula',
+        help_text='Cédula de Identidad del Director(a) de la Institución (ej. V-12345678).',
+    )
+
+    director_cdce_nombre = models.CharField(
+        max_length=200,
+        db_column='director_cdce_nombre',
+        help_text='Nombre completo del Director(a) del CDCE Estadal.',
+    )
+    director_cdce_cedula = models.CharField(
+        max_length=20,
+        db_column='director_cdce_cedula',
+        help_text='Cédula de Identidad del Director(a) del CDCE Estadal (ej. V-12345678).',
+    )
+
+    fecha_actualizacion = models.DateTimeField(
+        auto_now=True,
+        db_column='fecha_actualizacion',
+    )
+
+    class Meta:
+        managed = True
+        db_table = 'configuracion_institucional'
+        verbose_name = 'Configuración Institucional'
+        verbose_name_plural = 'Configuración Institucional'
+
+    def save(self, *args, **kwargs):
+        # Singleton: asegurar que solo exista un registro
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # Evitar eliminar el registro singleton
+        pass
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f'Configuración Institucional - {self.nombre_institucion}'
 

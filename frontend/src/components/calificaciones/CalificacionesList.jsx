@@ -18,6 +18,7 @@ import {
   exportarBoletaCualitativa,
 } from '../../api/calificaciones';
 import axiosInstance from '../../api/axiosInstance';
+import ConstanciaProcesionModal from './ConstanciaProcesionModal';
 
 const INDICADORES_CUALITATIVOS = [
   { codigo: 'L', nombre: 'Logrado' },
@@ -50,6 +51,8 @@ export default function CalificacionesList() {
   const [savingCriterio, setSavingCriterio] = useState(false);
   const [nuevoCriterio, setNuevoCriterio] = useState('');
   const [descargasBoleta, setDescargasBoleta] = useState({});
+  const [constanciaModalOpen, setConstanciaModalOpen] = useState(false);
+  const [alumnoSeleccionado, setAlumnoSeleccionado] = useState(null);
 
   // Cargar catálogos para seleccionar el período y el grupo.
   useEffect(() => {
@@ -440,6 +443,17 @@ export default function CalificacionesList() {
                           >
                             <FileSpreadsheet className="h-4 w-4" />
                           </button>
+                          <button
+                            onClick={() => {
+                              setAlumnoSeleccionado(alumno);
+                              setConstanciaModalOpen(true);
+                            }}
+                            title="Constancia de Procesión"
+                            aria-label={`Constancia de Procesión de ${nombreCompleto}`}
+                            className="rounded-md p-2 text-indigo-600 hover:bg-indigo-50"
+                          >
+                            <GraduationCap className="h-4 w-4" />
+                          </button>
                         </div>
                       </td>
                       {criterios.map((criterio) => (
@@ -508,6 +522,12 @@ export default function CalificacionesList() {
             No hay criterios de evaluación configurados para esta sección.
           </div>
         ) : null}
-    </div>
+
+        <ConstanciaProcesionModal
+          isOpen={constanciaModalOpen}
+          onClose={() => setConstanciaModalOpen(false)}
+          alumno={alumnoSeleccionado}
+        />
+      </div>
   );
 }

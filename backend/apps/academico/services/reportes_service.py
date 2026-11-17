@@ -42,6 +42,10 @@ from ..reports import (
     generar_pdf_constancia_prosecucion,
     generar_pdf_informe_descriptivo,
 )
+from ..reports_procesion import (
+    generar_pdf_constancia_procesion,
+    generar_constancias_lote_pdf as _generar_constancias_lote_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -278,4 +282,26 @@ class ReportesService:
             alumno.cedula_escolar or alumno.numero_documento_identidad or alumno_id
         )
         filename = cls._sanitizar_filename(f'Constancia_Prosecucion_{cedula}.pdf')
+        return pdf_buffer, filename
+
+    @classmethod
+    def generar_constancias_lote_pdf(
+        cls,
+        constancias_queryset,
+    ) -> Tuple[io.BytesIO, str]:
+        """
+        Genera un PDF multipágina con una Constancia de Procesión por cada
+        entrada del queryset. Cada constancia ocupa una página.
+
+        Retorna (io.BytesIO, filename).
+        """
+        try:
+            pdf_buffer, filename = _generar_constancias_lote_pdf(
+                constancias_queryset,
+            )
+        except Exception:
+            logger.debug(
+                'Error generando constancias en lote', exc_info=True,
+            )
+            raise ReporteError('No se pudo generar el lote de constancias PDF.')
         return pdf_buffer, filename
