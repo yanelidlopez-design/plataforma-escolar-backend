@@ -251,12 +251,12 @@ export default function Reportes() {
         </div>
       </section>
 
-      {/* Sección: Constancias de Procesión (Educación Primaria) */}
+      {/* Sección: Constancias de Prosecución (Educación Primaria) */}
       <section className="mt-6 rounded-xl border border-gray-200 bg-white p-6">
         <div className="mb-5">
           <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
             <GraduationCap className="w-5 h-5 text-indigo-600" />
-            Constancias de Procesión (Educación Primaria)
+            Constancias de Prosecución (Educación Primaria)
           </h2>
           <p className="mt-1 text-sm text-gray-500">
             Genera un PDF multipágina con una constancia por estudiante del grado y sección seleccionados.

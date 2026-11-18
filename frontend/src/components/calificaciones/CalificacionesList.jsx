@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Plus,
   Trash2,
+  Globe,
 } from 'lucide-react';
 import { downloadFile } from '../../utils/downloadFile';
 import {
@@ -53,6 +54,7 @@ export default function CalificacionesList() {
   const [descargasBoleta, setDescargasBoleta] = useState({});
   const [constanciaModalOpen, setConstanciaModalOpen] = useState(false);
   const [alumnoSeleccionado, setAlumnoSeleccionado] = useState(null);
+  const [constanciasEstado, setConstanciasEstado] = useState({}); // alumnoId -> 'Pendiente' | 'Completado'
 
   // Cargar catálogos para seleccionar el período y el grupo.
   useEffect(() => {
@@ -106,6 +108,12 @@ export default function CalificacionesList() {
       setCriterios(data.criterios);
       setAlumnos(data.alumnos);
       setNotas(notasIndex);
+      // Inicializar estado de constancias de prosecución como Pendiente
+      const estadoInicial = {};
+      data.alumnos.forEach((a) => {
+        estadoInicial[a.id_alumno] = 'Pendiente';
+      });
+      setConstanciasEstado(estadoInicial);
     } catch (error) {
       console.error('Error al cargar calificaciones:', error);
       setAlumnos([]);
@@ -155,6 +163,13 @@ export default function CalificacionesList() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleConstanciaGuardada = (idAlumno) => {
+    setConstanciasEstado((prev) => ({
+      ...prev,
+      [idAlumno]: 'Completado',
+    }));
   };
 
   const handleAgregarCriterio = async (event) => {
@@ -304,6 +319,15 @@ export default function CalificacionesList() {
           >
             <Save className="w-4 h-4" /> Guardar Notas
           </button>
+          <button
+            onClick={() => {
+              setAlumnoSeleccionado(null);
+              setConstanciaModalOpen(true);
+            }}
+            className="btn-secondary flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700"
+          >
+            <Globe className="w-4 h-4" /> Configurar Institución / Prosecución
+          </button>
         </div>
       </div>
 
@@ -325,6 +349,7 @@ export default function CalificacionesList() {
               className="select-field"
             >
               <option value="">Seleccionar periodo</option>
+              <option value="constancia_prosecucion">Constancia de Prosecución (Final)</option>
               {periodos.map((p) => (
                 <option key={p.id_periodo || p.id} value={p.id_periodo || p.id}>
                   {p.nombre_periodo || p.codigo_periodo || `Periodo ${p.id_periodo || p.id}`}
@@ -382,6 +407,7 @@ export default function CalificacionesList() {
                 <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase w-48">Alumno</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center">Cédula</th>
                 <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center">Boleta</th>
+                <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center w-40">Constancia Prosecución</th>
                 {criterios.map((criterio) => (
                   <th
                     key={criterio.id}
@@ -395,13 +421,13 @@ export default function CalificacionesList() {
             <tbody className="divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={criterios.length + 3} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={criterios.length + 4} className="px-6 py-8 text-center text-gray-500">
                     Cargando alumnos y notas...
                   </td>
                 </tr>
               ) : alumnos.length === 0 ? (
                 <tr>
-                  <td colSpan={criterios.length + 3} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={criterios.length + 4} className="px-6 py-8 text-center text-gray-500">
                     No se encontraron alumnos para los filtros seleccionados.
                   </td>
                 </tr>
@@ -455,6 +481,38 @@ export default function CalificacionesList() {
                             <GraduationCap className="h-4 w-4" />
                           </button>
                         </div>
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAlumnoSeleccionado(alumno);
+                            setConstanciaModalOpen(true);
+                          }}
+                          disabled={loading}
+                          className={`flex items-center justify-center gap-1 px-3 py-2 rounded text-sm border ${
+                            constanciasEstado[alumno.id_alumno] === 'Completado'
+                              ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100'
+                              : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                          }`}
+                          title={`Constancia de Prosecución - ${nombreCompleto}`}
+                          aria-label={`Llenar Constancia de Prosecución de ${nombreCompleto}`}
+                        >
+                          {constanciasEstado[alumno.id_alumno] === 'Completado' ? (
+                            <span className="flex items-center gap-1">
+                              <span>✓</span> Completado
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <GraduationCap className="h-3.5 w-3.5" /> Llenar
+                            </span>
+                          )}
+                        </button>
+                        <span className="block mt-1 text-xs">
+                          {constanciasEstado[alumno.id_alumno] === 'Completado'
+                            ? 'Completado'
+                            : 'Pendiente'
+                        }</span>
                       </td>
                       {criterios.map((criterio) => (
                         <td
@@ -527,6 +585,7 @@ export default function CalificacionesList() {
           isOpen={constanciaModalOpen}
           onClose={() => setConstanciaModalOpen(false)}
           alumno={alumnoSeleccionado}
+          onConstanciaGuardada={handleConstanciaGuardada}
         />
       </div>
   );

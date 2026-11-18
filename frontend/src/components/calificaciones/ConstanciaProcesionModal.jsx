@@ -34,6 +34,7 @@ export default function ConstanciaProcesionModal({
   isOpen,
   onClose,
   alumno,
+  onConstanciaGuardada,
 }) {
   const [constanciaData, setConstanciaData] = useState({
     periodo_escolar: '',
@@ -61,9 +62,11 @@ export default function ConstanciaProcesionModal({
   const [editandoConfig, setEditandoConfig] = useState(false);
 
   useEffect(() => {
-    if (!isOpen || !alumno) return;
+    if (!isOpen) return;
     setError('');
-    cargarConstancia();
+    if (alumno?.id_alumno) {
+      cargarConstancia();
+    }
     cargarConfiguracion();
   }, [isOpen, alumno]);
 
@@ -118,6 +121,9 @@ export default function ConstanciaProcesionModal({
         ...constanciaData,
       });
       setExisteConstancia(true);
+      if (onConstanciaGuardada) {
+        onConstanciaGuardada(alumno.id_alumno);
+      }
       const d = new Date(constanciaData.fecha_expedicion);
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       setError(`Constancia guardada: ${constanciaData.lugar_expedicion}, ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}.`);
@@ -176,11 +182,21 @@ export default function ConstanciaProcesionModal({
   ].filter(Boolean).join(' ');
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Constancia de Procesión - Educación Primaria">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={
+        alumno
+          ? `Constancia de Prosecución - ${nombreCompleto}`
+          : 'Configuración Institucional / Prosecución'
+      }
+    >
       <div className="space-y-4 max-h-[70vh] overflow-y-auto">
-        <div className="border rounded-lg p-4 bg-gray-50">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Datos del Estudiante</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        {alumno ? (
+          <>
+            <div className="border rounded-lg p-4 bg-gray-50">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Datos del Estudiante</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Nombre completo</label>
               <input type="text" value={nombreCompleto} readOnly className="w-full border p-1 rounded bg-white" />
@@ -199,7 +215,10 @@ export default function ConstanciaProcesionModal({
             </div>
           </div>
         </div>
-
+          </>
+        ) : null}
+        {alumno ? (
+          <>
         <div className="border rounded-lg p-4 bg-white">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
             <Info className="w-4 h-4 text-blue-600" /> Datos de Procesión
@@ -275,7 +294,10 @@ export default function ConstanciaProcesionModal({
             </div>
           </div>
         </div>
-
+          </>
+        ) : null}
+        {alumno ? (
+          <>
         <div className="flex gap-3 justify-end">
           <button
             onClick={handleGuardar}
@@ -294,6 +316,8 @@ export default function ConstanciaProcesionModal({
             </button>
           )}
         </div>
+          </>
+        ) : null}
 
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
