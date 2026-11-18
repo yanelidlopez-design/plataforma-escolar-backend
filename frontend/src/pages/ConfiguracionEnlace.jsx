@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/common/Card';
 import Modal from '../components/common/Modal';
 import { toast } from 'react-toastify';
-import { Globe, Clock, Layout, Mail, Plus } from 'lucide-react';
+import { Globe, Clock, Layout, Mail, Plus, Copy, ExternalLink } from 'lucide-react';
 
 // APIs para URLs de inscripción (módulo academico)
 import {
@@ -18,6 +18,7 @@ import {
   crearEnlaceAsistencia,
   actualizarEnlaceAsistencia,
   eliminarEnlaceAsistencia,
+  obtenerEnlaceActivo,
 } from '../api/asistenciaPublica';
 
 /** Página unificada para gestionar enlaces de inscripción y asistencia */
@@ -29,6 +30,7 @@ export default function ConfiguracionEnlace() {
 
   const [asistenciaEnlaces, setAsistenciaEnlaces] = useState([]);
   const [loadingAsistencia, setLoadingAsistencia] = useState(true);
+  const [enlaceActivoHoy, setEnlaceActivoHoy] = useState(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -39,6 +41,29 @@ export default function ConfiguracionEnlace() {
   });
 
   useEffect(() => { cargarDatos(); }, []);
+
+  // Cargar el enlace activo de asistencia para hoy cuando la pestaña de asistencia esté activa
+  useEffect(() => {
+    if (activeTab !== 'asistencia') return;
+    const cargarEnlaceActivo = async () => {
+      try {
+        const resp = await obtenerEnlaceActivo();
+        if (resp.data && resp.data.token_acceso) {
+          setEnlaceActivoHoy(resp.data);
+          // Asegurar que aparezca en la lista si no está ya
+          const yaExiste = asistenciaEnlaces.some(
+            (e) => e.id === resp.data.id || e.token_acceso === resp.data.token_acceso,
+          );
+          if (!yaExiste) {
+            setAsistenciaEnlaces((prev) => [resp.data, ...prev]);
+          }
+        }
+      } catch (e) {
+        // No hay enlace activo hoy; no es error crítico
+      }
+    };
+    cargarEnlaceActivo();
+  }, [activeTab, asistenciaEnlaces]);
 
   const cargarDatos = async () => {
     try {
@@ -112,12 +137,41 @@ export default function ConfiguracionEnlace() {
           <Card>
             <CardContent className="p-4">
               <div className="space-y-2">
-                {inscripcionUrls.map((url) => (
+                {inscripcionUrls.map((url) => {
+                const urlCompleta = `${window.location.origin}/externo/${url.token_acceso}`;
+                return (
                   <div key={url.id} className="border p-3 rounded bg-white">
-                    <div className="font-mono text-sm mb-1">{url.token_acceso?.substring(0, 20)}...</div>
                     <div className="text-sm text-gray-600">Servicio: {url.nombre || 'N/A'}</div>
                     <div className="text-sm text-gray-600">
                       Estado: {url.activo_manual ? 'Activo' : 'Inactivo'}
+                    </div>
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-100">
+                        <input
+                          type="text"
+                          readOnly
+                          value={urlCompleta}
+                          className="flex-1 text-xs font-mono text-gray-700 bg-transparent border-0 focus:ring-0 sm:text-sm"
+                        />
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(urlCompleta);
+                            toast.success('Enlace copiado al portapapeles');
+                          }}
+                          className="flex items-center gap-1 bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 text-xs"
+                          title="Copiar Enlace"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <a
+                        href={urlCompleta}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs underline hover:no-underline"
+                      >
+                        <ExternalLink className="w-3 h-3" /> Abrir
+                      </a>
                     </div>
                     <div className="flex gap-2 mt-2">
                       <button onClick={() => {
@@ -133,7 +187,8 @@ export default function ConfiguracionEnlace() {
                       <button onClick={() => { if (confirm('¿Eliminar?')) { deleteUrlExterna(url.id).then(() => cargarDatos()); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
                     </div>
                   </div>
-                ))}
+                );
+              })}
                 {inscripcionUrls.length === 0 && (
                   <p className="text-gray-500 text-sm text-center py-4">Sin enlaces de inscripción externa</p>
                 )}
@@ -165,29 +220,105 @@ export default function ConfiguracionEnlace() {
 
           <Card>
             <CardContent className="p-4">
-              <div className="space-y-2">
-                {asistenciaEnlaces.map((enlace) => (
-                  <div key={enlace.id} className="border p-3 rounded bg-white">
-                    <div className="font-mono text-sm mb-1">{enlace.token_acceso?.substring(0, 20)}...</div>
-                    <div className="text-sm text-gray-600">Fecha: {enlace.fecha_dia || 'N/A'}</div>
-                    <div className="text-sm text-gray-600">
-                      Estado: {enlace.activo ? 'Activo' : 'Inactivo'}
-                    </div>
-                    <div className="flex gap-2 mt-2">
-                      <button onClick={() => {
-                        setEditingId(enlace.id); setType('asistencia');
-                        setInscripcionData({
-                          fecha_dia: enlace.fecha_dia, activo: enlace.activo,
-                          token_acceso: enlace.token_acceso || '',
-                          fecha_vigencia_inicio: enlace.fecha_vigencia_inicio || '',
-                          fecha_vigencia_fin: enlace.fecha_vigencia_fin || '',
-                        });
-                        setModalOpen(true);
-                      }} className="text-blue-600 hover:underline text-sm">Editar</button>
-                      <button onClick={() => { if (confirm('¿Eliminar?')) { eliminarEnlaceAsistencia(enlace.id).then(() => cargarDatos()); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+              {enlaceActivoHoy && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <ExternalLink className="w-4 h-4 text-blue-600 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-semibold text-blue-800">
+                        Enlace activo de asistencia para hoy
+                      </div>
+                      <div className="text-xs text-blue-700 mt-1">
+                        Fecha: {enlaceActivoHoy.fecha_dia || 'N/A'}
+                      </div>
                     </div>
                   </div>
-                ))}
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-center gap-2 bg-white p-2 rounded border border-blue-100">
+                      <input
+                        type="text"
+                        readOnly
+                        value={`${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`}
+                        className="flex-1 text-xs font-mono text-gray-700 bg-transparent border-0 focus:ring-0 sm:text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`;
+                          navigator.clipboard.writeText(url);
+                          toast.success('Enlace copiado al portapapeles');
+                        }}
+                        className="flex items-center gap-1 bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 text-xs"
+                        title="Copiar Enlace"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <a
+                      href={`${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs underline hover:no-underline"
+                    >
+                      <ExternalLink className="w-3 h-3" /> Abrir enlace de hoy
+                    </a>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                {asistenciaEnlaces.map((enlace) => {
+                  const urlCompleta = `${window.location.origin}/asistencia/${enlace.token_acceso}`;
+                  return (
+                    <div key={enlace.id} className="border p-3 rounded bg-white">
+                      <div className="text-sm text-gray-600">
+                        Fecha: {enlace.fecha_dia || 'N/A'}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        Estado: {enlace.activo ? 'Activo' : 'Inactivo'}
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-100">
+                          <input
+                            type="text"
+                            readOnly
+                            value={urlCompleta}
+                            className="flex-1 text-xs font-mono text-gray-700 bg-transparent border-0 focus:ring-0 sm:text-sm"
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(urlCompleta);
+                              toast.success('Enlace copiado al portapapeles');
+                            }}
+                            className="flex items-center gap-1 bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 text-xs"
+                            title="Copiar Enlace"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <a
+                          href={urlCompleta}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs underline hover:no-underline"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Abrir
+                        </a>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={() => {
+                          setEditingId(enlace.id); setType('asistencia');
+                          setInscripcionData({
+                            fecha_dia: enlace.fecha_dia, activo: enlace.activo,
+                            token_acceso: enlace.token_acceso || '',
+                            fecha_vigencia_inicio: enlace.fecha_vigencia_inicio || '',
+                            fecha_vigencia_fin: enlace.fecha_vigencia_fin || '',
+                          });
+                          setModalOpen(true);
+                        }} className="text-blue-600 hover:underline text-sm">Editar</button>
+                        <button onClick={() => { if (confirm('¿Eliminar?')) { eliminarEnlaceAsistencia(enlace.id).then(() => cargarDatos()); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                      </div>
+                    </div>
+                  );
+                })}
                 {asistenciaEnlaces.length === 0 && (
                   <p className="text-gray-500 text-sm text-center py-4">Sin enlaces de asistencia pública</p>
                 )}
