@@ -77,6 +77,8 @@ export default function CalificacionesList() {
 
   // Cargar alumnos y notas según filtros
   const cargarCalificaciones = async () => {
+    const modoProsecucion = filtros.id_periodo === 'constancia_prosecucion';
+
     if (!filtros.id_periodo || !filtros.id_grado || !filtros.id_seccion) {
       setAlumnos([]);
       setNotas({});
@@ -88,32 +90,52 @@ export default function CalificacionesList() {
     setLoading(true);
     setError('');
     try {
-      const params = {
-        id_periodo: filtros.id_periodo,
-        id_grado: filtros.id_grado,
-        id_seccion: filtros.id_seccion,
-      };
-      const { data } = await getEvaluacionesCualitativas(params);
-      const notasIndex = {};
-      data.alumnos.forEach((alumno) => {
-        alumno.evaluaciones.forEach((evaluacion) => {
-          notasIndex[`${alumno.id_alumno}-${evaluacion.id_criterio}`] = {
-            indicador: evaluacion.indicador,
-            sugerencias: evaluacion.sugerencias,
-          };
+      if (modoProsecucion) {
+        // Modo Constancia de Prosecución: cargar solo alumnos del grado/sección
+        // sin consultar criterios de evaluación tradicionales.
+        const { data } = await axiosInstance.get('/academico/alumnos/', {
+          params: { grado: filtros.id_grado, seccion: filtros.id_seccion },
         });
-      });
+        const alumnosList = data.results || data || [];
+        setAlumnos(alumnosList);
+        setCriterios([]);
+        setNivelEducativo('');
+        setNotas({});
+        // Inicializar estado de constancias de prosecución como Pendiente
+        const estadoInicial = {};
+        alumnosList.forEach((a) => {
+          estadoInicial[a.id_alumno] = 'Pendiente';
+        });
+        setConstanciasEstado(estadoInicial);
+      } else {
+        // Modo tradicional de calificaciones por criterios/lapso.
+        const params = {
+          id_periodo: filtros.id_periodo,
+          id_grado: filtros.id_grado,
+          id_seccion: filtros.id_seccion,
+        };
+        const { data } = await getEvaluacionesCualitativas(params);
+        const notasIndex = {};
+        data.alumnos.forEach((alumno) => {
+          alumno.evaluaciones.forEach((evaluacion) => {
+            notasIndex[`${alumno.id_alumno}-${evaluacion.id_criterio}`] = {
+              indicador: evaluacion.indicador,
+              sugerencias: evaluacion.sugerencias,
+            };
+          });
+        });
 
-      setNivelEducativo(data.nivel_educativo);
-      setCriterios(data.criterios);
-      setAlumnos(data.alumnos);
-      setNotas(notasIndex);
-      // Inicializar estado de constancias de prosecución como Pendiente
-      const estadoInicial = {};
-      data.alumnos.forEach((a) => {
-        estadoInicial[a.id_alumno] = 'Pendiente';
-      });
-      setConstanciasEstado(estadoInicial);
+        setNivelEducativo(data.nivel_educativo);
+        setCriterios(data.criterios);
+        setAlumnos(data.alumnos);
+        setNotas(notasIndex);
+        // Inicializar estado de constancias de prosecución como Pendiente
+        const estadoInicial = {};
+        data.alumnos.forEach((a) => {
+          estadoInicial[a.id_alumno] = 'Pendiente';
+        });
+        setConstanciasEstado(estadoInicial);
+      }
     } catch (error) {
       console.error('Error al cargar calificaciones:', error);
       setAlumnos([]);
@@ -242,10 +264,11 @@ export default function CalificacionesList() {
   const filtrosCompletos = Boolean(
     filtros.id_periodo && filtros.id_grado && filtros.id_seccion,
   );
+  const modoProsecucion = filtros.id_periodo === 'constancia_prosecucion';
   const tieneDatosParaGuardar = Object.values(notas).some(
     (nota) => nota.indicador || nota.sugerencias?.trim(),
   );
-  const administradorCriterios = filtrosCompletos && nivelEducativo !== 'INICIAL' ? (
+  const administradorCriterios = filtrosCompletos && filtros.id_periodo !== 'constancia_prosecucion' && nivelEducativo !== 'INICIAL' ? (
     <section className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
       <div>
         <h3 className="text-sm font-semibold text-gray-900">Criterios de este período y sección</h3>
@@ -390,6 +413,106 @@ export default function CalificacionesList() {
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
           Educación Inicial se registra mediante informes descriptivos, según la escala pedagógica configurada.
         </div>
+      ) : modoProsecucion ? (
+      <>
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+              Constancia de Prosecución ({alumnos.length} alumnos)
+            </h3>
+            <p className="text-xs text-gray-500">
+              Grado {filtros.id_grado} - Sección {filtros.id_seccion}
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+                <tr>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase w-48">Alumno</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center">Cédula</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center w-40">Estado</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center w-40">Acción</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-gray-600 uppercase text-center w-40">PDF</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {alumnos.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-gray-500">
+                      No se encontraron alumnos para el grado y sección seleccionados.
+                    </td>
+                  </tr>
+                ) : (
+                  alumnos.map((alumno) => {
+                    const nombreCompleto = [
+                      alumno.primer_nombre,
+                      alumno.segundo_nombre,
+                      alumno.primer_apellido,
+                      alumno.segundo_apellido,
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    const cedula = alumno.cedula_escolar || alumno.numero_documento_identidad || '—';
+                    const estaCompletado = constanciasEstado[alumno.id_alumno] === 'Completado';
+
+                    return (
+                      <tr key={alumno.id_alumno} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 text-sm text-gray-900 font-medium">{nombreCompleto}</td>
+                        <td className="px-6 py-4 text-sm text-gray-600 text-center">{cedula}</td>
+                        <td className="px-6 py-4 text-sm text-center">
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${estaCompletado ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+                            {estaCompletado ? 'Completado' : 'Pendiente'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAlumnoSeleccionado(alumno);
+                              setConstanciaModalOpen(true);
+                            }}
+                            disabled={loading}
+                            className={`flex items-center justify-center gap-1 px-3 py-2 rounded text-sm border ${estaCompletado ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'}`}
+                            title={`Llenar Constancia de Prosecución - ${nombreCompleto}`}
+                          >
+                            {estaCompletado ? (
+                              <span className="flex items-center gap-1"><span>✓</span> Editar</span>
+                            ) : (
+                              <span className="flex items-center gap-1"><GraduationCap className="h-3.5 w-3.5" /> Llenar</span>
+                            )}
+                          </button>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {estaCompletado ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAlumnoSeleccionado(alumno);
+                                setConstanciaModalOpen(true);
+                              }}
+                              className="flex items-center justify-center gap-1 px-3 py-2 rounded text-sm bg-green-600 text-white border border-transparent hover:bg-green-700"
+                              title={`Descargar PDF de ${nombreCompleto}`}
+                            >
+                              <FileDown className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {alumnos.length > 0 && (
+          <div className="mt-4 text-sm text-gray-500 text-center">
+            Seleccione un alumno para llenar o editar su constancia de prosecución.
+          </div>
+        )}
+      </>
       ) : filtrosCompletos && criterios.length > 0 ? (
       <>
       {/* Tabla estructurada de calificaciones */}
