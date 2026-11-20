@@ -275,3 +275,33 @@ CREATE TABLE IF NOT EXISTS `alumno_representante` (
     CONSTRAINT `fk_alumno_representante_representante` FOREIGN KEY (`id_representante`)
         REFERENCES `representantes_legales` (`id_representante`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `configuracion_institucional` (
+    `id_configuracion` INT NOT NULL AUTO_INCREMENT,
+    `nombre_institucion` VARCHAR(200) NOT NULL,
+    `municipio` VARCHAR(100) NOT NULL,
+    `parroquia` VARCHAR(100) NOT NULL,
+    `cdce_estadal` VARCHAR(200) NOT NULL,
+    `director_institucion_nombre` VARCHAR(200) NOT NULL,
+    `director_institucion_cedula` VARCHAR(20) NOT NULL,
+    `director_cdce_nombre` VARCHAR(200) NOT NULL,
+    `director_cdce_cedula` VARCHAR(20) NOT NULL,
+    `fecha_actualizacion` DATETIME(6) NULL,
+    PRIMARY KEY (`id_configuracion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `constancia_prosecucion_final` (
+    `id` INT NOT NULL AUTO_INCREMENT,
+    `id_alumno` INT NOT NULL,
+    `periodo_escolar` VARCHAR(9) NOT NULL,
+    `literal_final` VARCHAR(1) NOT NULL,
+    `grado_cursado` VARCHAR(50) NULL,
+    `promovido_al_grado` VARCHAR(50) NOT NULL,
+    `lugar_expedicion` VARCHAR(100) NULL,
+    `fecha_expedicion` DATETIME(6) NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `constancia_prosecucion_final_alumno_periodo_uniq` (`id_alumno`, `periodo_escolar`),
+    KEY `constancia_prosecucion_final_alumno_idx` (`id_alumno`),
+    CONSTRAINT `fk_constancia_prosecucion_final_alumno` FOREIGN KEY (`id_alumno`)
+        REFERENCES `alumnos` (`id_alumno`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

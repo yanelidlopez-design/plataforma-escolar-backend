@@ -79,6 +79,8 @@ class ConfiguracionInstitucionalSerializer(serializers.ModelSerializer):
     Datos institucionales y de dirección para la generación de
     Constancias de Procesión en el Nivel de Educación Primaria.
     Singleton: solo existe un registro (pk=1).
+    Todos los campos son opcionales para permitir actualizaciones parciales
+    (PATCH) y guardado progresivo del formulario institucional.
     """
 
     class Meta:
@@ -96,6 +98,16 @@ class ConfiguracionInstitucionalSerializer(serializers.ModelSerializer):
             'fecha_actualizacion',
         )
         read_only_fields = ('id_configuracion', 'fecha_actualizacion')
+        extra_kwargs = {
+            'nombre_institucion': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'municipio': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'parroquia': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'cdce_estadal': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'director_institucion_nombre': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'director_institucion_cedula': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'director_cdce_nombre': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'director_cdce_cedula': {'required': False, 'allow_blank': True, 'allow_null': True},
+        }
 
 
 class AlumnosSerializer(serializers.ModelSerializer):
@@ -1085,11 +1097,22 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
     - RegexValidator ``^[A-E]$$`` sobre ``literal_final`` (letras A-E).
     - Restricción única de un solo registro por alumno y periodo escolar
       (``unique_together``), aplicado por DRF como UniqueTogetherValidator.
+
+    Campos opcionales salvo ``alumno``, ``periodo_escolar`` y ``literal_final``
+    para permitir guardado parcial del formulario.
     """
 
     class Meta:
         model = ConstanciaProsecucionFinal
         fields = ['id', 'alumno', 'periodo_escolar', 'literal_final', 'promovido_al_grado', 'grado_cursado', 'lugar_expedicion']
+        extra_kwargs = {
+            'alumno': {'required': True},
+            'periodo_escolar': {'required': True},
+            'literal_final': {'required': True},
+            'promovido_al_grado': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'grado_cursado': {'required': False, 'allow_blank': True, 'allow_null': True},
+            'lugar_expedicion': {'required': False, 'allow_blank': True, 'allow_null': True},
+        }
 
     def create(self, validated_data):
         # Auditoría: la unicidad (alumno + periodo) puede fallar por una

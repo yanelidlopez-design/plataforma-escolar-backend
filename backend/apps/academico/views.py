@@ -2161,7 +2161,7 @@ class RegistrarConstanciaProsecucionAPIView(APIView):
                 status=status.HTTP_201_CREATED,
             )
         return Response(
-            {'success': False, 'errors': serializer.errors},
+            {'success': False, 'error': serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -2426,7 +2426,7 @@ class ConfiguracionInstitucionalAPIView(APIView):
                 status=status.HTTP_201_CREATED,
             )
         return Response(
-            {'success': False, 'errors': serializer.errors},
+            {'success': False, 'error': serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -2440,7 +2440,21 @@ class ConfiguracionInstitucionalAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
         return Response(
-            {'success': False, 'errors': serializer.errors},
+            {'success': False, 'error': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def patch(self, request, *args, **kwargs):
+        config = ConfiguracionInstitucional.get_solo()
+        serializer = ConfiguracionInstitucionalSerializer(config, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {'success': True, 'configuracion': serializer.data},
+                status=status.HTTP_200_OK,
+            )
+        return Response(
+            {'success': False, 'error': serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
