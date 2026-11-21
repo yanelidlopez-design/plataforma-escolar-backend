@@ -128,7 +128,23 @@ export default function ConstanciaProcesionModal({
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       setError(`Constancia guardada: ${constanciaData.lugar_expedicion}, ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}.`);
     } catch (e) {
-      setError(e.response?.data?.error || 'No se pudo guardar la constancia.');
+      const backendError = e.response?.data?.error;
+      let mensaje = 'No se pudo guardar la constancia.';
+      if (backendError) {
+        if (typeof backendError === 'object' && backendError !== null) {
+          // Errores de validación del serializador (ej. {literal_final: [...], ...})
+          const errores = Object.entries(backendError)
+            .map(([campo, msgs]) => {
+              const lista = Array.isArray(msgs) ? msgs.join(', ') : String(msgs);
+              return `${campo}: ${lista}`;
+            })
+            .join(' | ');
+          mensaje = errores || 'Error de validación en los datos.';
+        } else {
+          mensaje = String(backendError);
+        }
+      }
+      setError(mensaje);
     } finally {
       setGuardando(false);
     }
@@ -146,7 +162,22 @@ export default function ConstanciaProcesionModal({
       setEditandoConfig(false);
       setError('Datos institucionales guardados correctamente.');
     } catch (e) {
-      setError(e.response?.data?.error || 'No se pudo guardar la configuración institucional.');
+      const backendError = e.response?.data?.error;
+      let mensaje = 'No se pudo guardar la configuración institucional.';
+      if (backendError) {
+        if (typeof backendError === 'object' && backendError !== null) {
+          const errores = Object.entries(backendError)
+            .map(([campo, msgs]) => {
+              const lista = Array.isArray(msgs) ? msgs.join(', ') : String(msgs);
+              return `${campo}: ${lista}`;
+            })
+            .join(' | ');
+          mensaje = errores || 'Error de validación en los datos.';
+        } else {
+          mensaje = String(backendError);
+        }
+      }
+      setError(mensaje);
     } finally {
       setGuardando(false);
     }

@@ -22,7 +22,7 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('django-admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', MiTokenRefreshView.as_view(), name='token_refresh'),
     path('api/core/', include('apps.core.urls')),
@@ -40,7 +40,7 @@ if settings.DEBUG:
 if settings.FRONTEND_DIST_DIR.is_dir():
     urlpatterns += [
         re_path(
-            r'^(?!api(?:/|$)|admin(?:/|$)|static(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
+            r'^(?!api(?:/|$)|django-admin(?:/|$)|static(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
             serve_frontend,
             name='frontend-spa',
         ),

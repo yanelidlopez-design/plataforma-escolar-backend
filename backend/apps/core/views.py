@@ -346,6 +346,7 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
 
 @swagger_auto_schema(method='get', tags=['Asistencia Pública'])
 @api_view(['GET'])
+@authentication_classes([])
 @permission_classes([permissions.AllowAny])
 def asistencia_publica_link(request):
     """Endpoint público que devuelve el enlace activo del día.
