@@ -128,7 +128,7 @@ export default function ConstanciaProcesionModal({
       const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
       setError(`Constancia guardada: ${constanciaData.lugar_expedicion}, ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}.`);
     } catch (e) {
-      const backendError = e.response?.data?.error;
+      const backendError = e.response?.data?.detail ?? e.response?.data?.error;
       let mensaje = 'No se pudo guardar la constancia.';
       if (backendError) {
         if (typeof backendError === 'object' && backendError !== null) {
@@ -143,6 +143,11 @@ export default function ConstanciaProcesionModal({
         } else {
           mensaje = String(backendError);
         }
+      } else {
+        // Fallback: mostrar detalle completo de la respuesta para depuración
+        mensaje = e.response?.data
+          ? JSON.stringify(e.response.data)
+          : e.message || 'No se pudo guardar la constancia.';
       }
       setError(mensaje);
     } finally {
@@ -162,7 +167,7 @@ export default function ConstanciaProcesionModal({
       setEditandoConfig(false);
       setError('Datos institucionales guardados correctamente.');
     } catch (e) {
-      const backendError = e.response?.data?.error;
+      const backendError = e.response?.data?.detail ?? e.response?.data?.error;
       let mensaje = 'No se pudo guardar la configuración institucional.';
       if (backendError) {
         if (typeof backendError === 'object' && backendError !== null) {
@@ -176,6 +181,11 @@ export default function ConstanciaProcesionModal({
         } else {
           mensaje = String(backendError);
         }
+      } else {
+        // Fallback: mostrar detalle completo de la respuesta para depuración
+        mensaje = e.response?.data
+          ? JSON.stringify(e.response.data)
+          : e.message || 'No se pudo guardar la configuración institucional.';
       }
       setError(mensaje);
     } finally {
@@ -199,7 +209,7 @@ export default function ConstanciaProcesionModal({
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (e) {
-      setError(e.response?.data?.error || 'No se pudo descargar el PDF.');
+      setError(e.response?.data?.detail || e.response?.data?.error || JSON.stringify(e.response?.data) || e.message || 'No se pudo descargar el PDF.');
     } finally {
       setDescargando(false);
     }

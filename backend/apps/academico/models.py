@@ -640,43 +640,59 @@ class ConfiguracionInstitucional(models.Model):
     nombre_institucion = models.CharField(
         max_length=200,
         db_column='nombre_institucion',
+        blank=True,
+        null=True,
         help_text='Nombre oficial de la Institución Educativa.',
     )
     municipio = models.CharField(
         max_length=100,
         db_column='municipio',
+        blank=True,
+        null=True,
         help_text='Municipio donde está ubicada la institución.',
     )
     parroquia = models.CharField(
         max_length=100,
         db_column='parroquia',
+        blank=True,
+        null=True,
         help_text='Parroquia donde está ubicada la institución.',
     )
     cdce_estadal = models.CharField(
         max_length=200,
         db_column='cdce_estadal',
+        blank=True,
+        null=True,
         help_text='Centro de Desarrollo de la Calidad Educativa Estadal.',
     )
 
     director_institucion_nombre = models.CharField(
         max_length=200,
         db_column='director_institucion_nombre',
+        blank=True,
+        null=True,
         help_text='Nombre completo del Director(a) de la Institución Educativa.',
     )
     director_institucion_cedula = models.CharField(
         max_length=20,
         db_column='director_institucion_cedula',
+        blank=True,
+        null=True,
         help_text='Cédula de Identidad del Director(a) de la Institución (ej. V-12345678).',
     )
 
     director_cdce_nombre = models.CharField(
         max_length=200,
         db_column='director_cdce_nombre',
+        blank=True,
+        null=True,
         help_text='Nombre completo del Director(a) del CDCE Estadal.',
     )
     director_cdce_cedula = models.CharField(
         max_length=20,
         db_column='director_cdce_cedula',
+        blank=True,
+        null=True,
         help_text='Cédula de Identidad del Director(a) del CDCE Estadal (ej. V-12345678).',
     )
 

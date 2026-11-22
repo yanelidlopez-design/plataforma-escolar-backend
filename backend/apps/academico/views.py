@@ -2505,6 +2505,15 @@ class ConstanciaProsecucionAlumnoAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        fecha_expedicion_raw = request.data.get('fecha_expedicion', '')
+        fecha_expedicion = None
+        if fecha_expedicion_raw:
+            try:
+                from datetime import datetime
+                fecha_expedicion = datetime.strptime(fecha_expedicion_raw, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                fecha_expedicion = None
+
         constancia, created = ConstanciaProsecucionFinal.objects.update_or_create(
             alumno=alumno,
             periodo_escolar=periodo,
@@ -2513,6 +2522,7 @@ class ConstanciaProsecucionAlumnoAPIView(APIView):
                 'promovido_al_grado': request.data.get('promovido_al_grado', ''),
                 'grado_cursado': request.data.get('grado_cursado', ''),
                 'lugar_expedicion': request.data.get('lugar_expedicion', ''),
+                'fecha_expedicion': fecha_expedicion,
             },
         )
 

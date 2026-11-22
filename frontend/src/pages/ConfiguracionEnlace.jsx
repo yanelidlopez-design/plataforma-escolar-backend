@@ -36,7 +36,7 @@ export default function ConfiguracionEnlace() {
   const [editingId, setEditingId] = useState(null);
   const [type, setType] = useState('inscripcion');
   const [inscripcionData, setInscripcionData] = useState({
-    fecha_dia: '', activo: true, token_acceso: '',
+    nombre: '', fecha_inicio: '', activo: true, token_acceso: '',
     fecha_vigencia_inicio: '', fecha_vigencia_fin: '',
   });
 
@@ -122,8 +122,12 @@ export default function ConfiguracionEnlace() {
               onClick={() => {
                 setType('inscripcion');
                 setEditingId(null);
+                const now = new Date();
+                const fechaInicio = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
                 setInscripcionData({
-                  fecha_dia: '', activo: true, token_acceso: '',
+                  nombre: `Inscripciones ${now.getFullYear()}-${now.getFullYear() + 1}`,
+                  fecha_inicio: fechaInicio,
+                  activo: true, token_acceso: '',
                   fecha_vigencia_inicio: '', fecha_vigencia_fin: '',
                 });
                 setModalOpen(true);
@@ -138,7 +142,7 @@ export default function ConfiguracionEnlace() {
             <CardContent className="p-4">
               <div className="space-y-2">
                 {inscripcionUrls.map((url) => {
-                const urlCompleta = `${window.location.origin}/externo/${url.token_acceso}`;
+                const urlCompleta = `${window.location.origin}/inscripcion-externa/${url.token_acceso}`;
                 return (
                   <div key={url.id} className="border p-3 rounded bg-white">
                     <div className="text-sm text-gray-600">Servicio: {url.nombre || 'N/A'}</div>
@@ -177,7 +181,8 @@ export default function ConfiguracionEnlace() {
                       <button onClick={() => {
                         setEditingId(url.id); setType('inscripcion');
                         setInscripcionData({
-                          fecha_dia: url.fecha_inicio?.split('T')[0] || '',
+                          nombre: url.nombre || '',
+                          fecha_inicio: url.fecha_inicio?.split('T')[0]?.slice(0, 16) || '',
                           activo: url.activo_manual, token_acceso: url.token_acceso || '',
                           fecha_vigencia_inicio: url.fecha_vigencia_inicio || '',
                           fecha_vigencia_fin: url.fecha_vigencia_fin || '',
@@ -206,8 +211,12 @@ export default function ConfiguracionEnlace() {
               onClick={() => {
                 setType('asistencia');
                 setEditingId(null);
+                const now = new Date();
+                const fechaInicio = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:mm
                 setInscripcionData({
-                  fecha_dia: '', activo: true, token_acceso: '',
+                  nombre: `Asistencia ${now.getFullYear()}`,
+                  fecha_inicio: fechaInicio,
+                  activo: true, token_acceso: '',
                   fecha_vigencia_inicio: '', fecha_vigencia_fin: '',
                 });
                 setModalOpen(true);
@@ -238,12 +247,12 @@ export default function ConfiguracionEnlace() {
                       <input
                         type="text"
                         readOnly
-                        value={`${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`}
+                        value={`${window.location.origin}/asistencia-publica/${enlaceActivoHoy.token_acceso}`}
                         className="flex-1 text-xs font-mono text-gray-700 bg-transparent border-0 focus:ring-0 sm:text-sm"
                       />
                       <button
                         onClick={() => {
-                          const url = `${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`;
+                          const url = `${window.location.origin}/asistencia-publica/${enlaceActivoHoy.token_acceso}`;
                           navigator.clipboard.writeText(url);
                           toast.success('Enlace copiado al portapapeles');
                         }}
@@ -254,7 +263,7 @@ export default function ConfiguracionEnlace() {
                       </button>
                     </div>
                     <a
-                      href={`${window.location.origin}/asistencia/${enlaceActivoHoy.token_acceso}`}
+                      href={`${window.location.origin}/asistencia-publica/${enlaceActivoHoy.token_acceso}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs underline hover:no-underline"
@@ -266,7 +275,7 @@ export default function ConfiguracionEnlace() {
               )}
               <div className="space-y-2">
                 {asistenciaEnlaces.map((enlace) => {
-                  const urlCompleta = `${window.location.origin}/asistencia/${enlace.token_acceso}`;
+                  const urlCompleta = `${window.location.origin}/asistencia-publica/${enlace.token_acceso}`;
                   return (
                     <div key={enlace.id} className="border p-3 rounded bg-white">
                       <div className="text-sm text-gray-600">
@@ -307,8 +316,9 @@ export default function ConfiguracionEnlace() {
                         <button onClick={() => {
                           setEditingId(enlace.id); setType('asistencia');
                           setInscripcionData({
-                            fecha_dia: enlace.fecha_dia, activo: enlace.activo,
-                            token_acceso: enlace.token_acceso || '',
+                            nombre: enlace.nombre || `Asistencia ${enlace.fecha_dia || ''}`,
+                            fecha_inicio: enlace.fecha_dia ? new Date(enlace.fecha_dia).toISOString().slice(0, 16) : '',
+                            activo: enlace.activo, token_acceso: enlace.token_acceso || '',
                             fecha_vigencia_inicio: enlace.fecha_vigencia_inicio || '',
                             fecha_vigencia_fin: enlace.fecha_vigencia_fin || '',
                           });
@@ -331,14 +341,21 @@ export default function ConfiguracionEnlace() {
       {/* Modal */}
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? 'Editar Enlace' : 'Nuevo Enlace'}>
         <div className="space-y-3">
-          <div><label className="block text-sm font-medium text-gray-700">Fecha:</label><input type="date" value={inscripcionData.fecha_dia} onChange={e => setInscripcionData({...inscripcionData, fecha_dia: e.target.value})} className="w-full border p-2 rounded" /></div>
+          <div><label className="block text-sm font-medium text-gray-700">Nombre del Período:</label><input type="text" value={inscripcionData.nombre} onChange={e => setInscripcionData({...inscripcionData, nombre: e.target.value})} placeholder="Ej: Inscripciones 2026-2027" className="w-full border p-2 rounded" /></div>
+          <div><label className="block text-sm font-medium text-gray-700">Fecha de Inicio:</label><input type="datetime-local" value={inscripcionData.fecha_inicio} onChange={e => setInscripcionData({...inscripcionData, fecha_inicio: e.target.value})} className="w-full border p-2 rounded" /></div>
+          <div><label className="block text-sm font-medium text-gray-700">Vigencia Fin:</label><input type="datetime-local" value={inscripcionData.fecha_vigencia_fin} onChange={e => setInscripcionData({...inscripcionData, fecha_vigencia_fin: e.target.value})} className="w-full border p-2 rounded" /></div>
           <div><label className="block text-sm font-medium text-gray-700">Activo:</label><select value={String(inscripcionData.activo)} onChange={e => setInscripcionData({...inscripcionData, activo: e.target.value === 'true'})} className="w-full border p-2 rounded"><option value="true">Activo</option><option value="false">Inactivo</option></select></div>
           <div><label className="block text-sm font-medium text-gray-700">Token / Código:</label><input type="text" value={inscripcionData.token_acceso} onChange={e => setInscripcionData({...inscripcionData, token_acceso: e.target.value})} placeholder="Generar automáticamente" className="w-full border p-2 rounded" /></div>
-          <div><label className="block text-sm font-medium text-gray-700">Vigencia Inicio:</label><input type="datetime-local" value={inscripcionData.fecha_vigencia_inicio} onChange={e => setInscripcionData({...inscripcionData, fecha_vigencia_inicio: e.target.value})} className="w-full border p-2 rounded" /></div>
-          <div><label className="block text-sm font-medium text-gray-700">Vigencia Fin:</label><input type="datetime-local" value={inscripcionData.fecha_vigencia_fin} onChange={e => setInscripcionData({...inscripcionData, fecha_vigencia_fin: e.target.value})} className="w-full border p-2 rounded" /></div>
           <div className="flex gap-2 pt-2">
             <button onClick={() => {
-              const data = { ...inscripcionData, activo: inscripcionData.activo };
+              // Mapear nombres de campos del frontend al backend de PeriodoInscripcion
+              const data = {
+                nombre: inscripcionData.nombre,
+                fecha_inicio: inscripcionData.fecha_inicio,
+                fecha_fin: inscripcionData.fecha_vigencia_fin,
+                activo_manual: inscripcionData.activo,
+                token_acceso: inscripcionData.token_acceso || undefined,
+              };
               if (editingId) {
                 if (type === 'asistencia') {
                   actualizarEnlaceAsistencia(editingId, data).then(() => { toast.success('Actualizado'); setModalOpen(false); setEditingId(null); cargarDatos(); });
