@@ -597,8 +597,8 @@ export default function CalificacionesList() {
                               setAlumnoSeleccionado(alumno);
                               setConstanciaModalOpen(true);
                             }}
-                            title="Constancia de Procesión"
-                            aria-label={`Constancia de Procesión de ${nombreCompleto}`}
+                            title="Constancia de Prosecución"
+                            aria-label={`Constancia de Prosecución de ${nombreCompleto}`}
                             className="rounded-md p-2 text-indigo-600 hover:bg-indigo-50"
                           >
                             <GraduationCap className="h-4 w-4" />

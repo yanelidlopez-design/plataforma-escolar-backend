@@ -19,6 +19,7 @@ from .models import (
     Alumnos, GruposAcademicos, Inscripciones, Calificaciones, Asistencias,
     PeriodoInscripcion, PeriodoCalificacion, CriterioEvaluacion,
     CriterioPeriodo, EvaluacionLapsoCriterio, AprendizajeAlcanzado,
+    ConstanciaProsecucionFinal,
     ConfiguracionAsistenciaPublica,
     ConfiguracionInstitucional,
 )

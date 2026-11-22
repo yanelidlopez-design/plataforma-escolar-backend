@@ -262,7 +262,7 @@ export default function ConstanciaProcesionModal({
           <>
         <div className="border rounded-lg p-4 bg-white">
           <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-            <Info className="w-4 h-4 text-blue-600" /> Datos de Procesión
+            <Info className="w-4 h-4 text-blue-600" /> Datos de Prosecución
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
