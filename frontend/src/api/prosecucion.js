@@ -1,3 +1,5 @@
+import axiosInstance from './axiosInstance';
+
 /**
  * prosecucion.js - Servicios para Constancia de Procesión en Educación Primaria.
  * Endpoints bajo /api/academico/prosecucion/
