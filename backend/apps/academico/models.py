@@ -518,6 +518,8 @@ class ConstanciaProsecucionFinal(models.Model):
         Alumnos,
         on_delete=models.CASCADE,
         db_column='id_alumno',
+        db_constraint=False,
+        help_text='FK hacia la tabla legacy alumnos (id_alumno es INT en ambos lados).',
     )
     periodo_escolar = models.CharField(
         max_length=9,
@@ -527,6 +529,8 @@ class ConstanciaProsecucionFinal(models.Model):
     literal_final = models.CharField(
         max_length=1,
         db_column='literal_final',
+        blank=True,
+        null=True,
         validators=[
             RegexValidator(
                 regex=r'^[A-E]$',
@@ -552,11 +556,15 @@ class ConstanciaProsecucionFinal(models.Model):
     promovido_al_grado = models.CharField(
         max_length=50,
         db_column='promovido_al_grado',
+        blank=True,
+        null=True,
         help_text='Ej: "Tercer Grado".',
     )
     fecha_expedicion = models.DateField(
-        auto_now_add=True,
         db_column='fecha_expedicion',
+        blank=True,
+        null=True,
+        help_text='Fecha de expedición de la constancia (YYYY-MM-DD).',
     )
 
     class Meta:

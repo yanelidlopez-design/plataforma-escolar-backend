@@ -2505,26 +2505,39 @@ class ConstanciaProsecucionAlumnoAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Normalizar fecha_expedicion: aceptar DD/MM/YYYY o YYYY-MM-DD;
+        # si viene vacía, usar la fecha local por defecto.
         fecha_expedicion_raw = request.data.get('fecha_expedicion', '')
         fecha_expedicion = None
         if fecha_expedicion_raw:
-            try:
-                from datetime import datetime
-                fecha_expedicion = datetime.strptime(fecha_expedicion_raw, '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                fecha_expedicion = None
+            for fmt in ('%d/%m/%Y', '%Y-%m-%d'):
+                try:
+                    from datetime import datetime
+                    fecha_expedicion = datetime.strptime(fecha_expedicion_raw, fmt).date()
+                    break
+                except (ValueError, TypeError):
+                    continue
+        if fecha_expedicion is None:
+            from django.utils import timezone
+            fecha_expedicion = timezone.localdate()
 
-        constancia, created = ConstanciaProsecucionFinal.objects.update_or_create(
-            alumno=alumno,
-            periodo_escolar=periodo,
-            defaults={
-                'literal_final': request.data.get('literal_final', ''),
-                'promovido_al_grado': request.data.get('promovido_al_grado', ''),
-                'grado_cursado': request.data.get('grado_cursado', ''),
-                'lugar_expedicion': request.data.get('lugar_expedicion', ''),
-                'fecha_expedicion': fecha_expedicion,
-            },
-        )
+        try:
+            constancia, created = ConstanciaProsecucionFinal.objects.update_or_create(
+                alumno=alumno,
+                periodo_escolar=periodo,
+                defaults={
+                    'literal_final': request.data.get('literal_final', '') or '',
+                    'promovido_al_grado': request.data.get('promovido_al_grado', '') or '',
+                    'grado_cursado': request.data.get('grado_cursado', '') or '',
+                    'lugar_expedicion': request.data.get('lugar_expedicion', '') or '',
+                    'fecha_expedicion': fecha_expedicion,
+                },
+            )
+        except Exception as exc:
+            return Response(
+                {'success': False, 'detail': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = ConstanciaProsecucionFinalSerializer(constancia)
         return Response(

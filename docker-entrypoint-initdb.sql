@@ -294,14 +294,19 @@ CREATE TABLE IF NOT EXISTS `constancia_prosecucion_final` (
     `id` INT NOT NULL AUTO_INCREMENT,
     `id_alumno` INT NOT NULL,
     `periodo_escolar` VARCHAR(9) NOT NULL,
-    `literal_final` VARCHAR(1) NOT NULL,
+    `literal_final` VARCHAR(1) NULL,
     `grado_cursado` VARCHAR(50) NULL,
-    `promovido_al_grado` VARCHAR(50) NOT NULL,
+    `promovido_al_grado` VARCHAR(50) NULL,
     `lugar_expedicion` VARCHAR(100) NULL,
-    `fecha_expedicion` DATETIME(6) NULL,
+    `fecha_expedicion` DATE NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `constancia_prosecucion_final_alumno_periodo_uniq` (`id_alumno`, `periodo_escolar`),
     KEY `constancia_prosecucion_final_alumno_idx` (`id_alumno`),
     CONSTRAINT `fk_constancia_prosecucion_final_alumno` FOREIGN KEY (`id_alumno`)
         REFERENCES `alumnos` (`id_alumno`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asegurar columnas en tablas existentes (idempotente: no falla si ya existen)
+ALTER TABLE `constancia_prosecucion_final` MODIFY COLUMN `literal_final` VARCHAR(1) NULL;
+ALTER TABLE `constancia_prosecucion_final` MODIFY COLUMN `promovido_al_grado` VARCHAR(50) NULL;
+ALTER TABLE `constancia_prosecucion_final` MODIFY COLUMN `fecha_expedicion` DATE NULL;

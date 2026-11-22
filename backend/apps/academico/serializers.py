@@ -1108,7 +1108,7 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'alumno': {'required': True},
             'periodo_escolar': {'required': True},
-            'literal_final': {'required': True},
+            'literal_final': {'required': False, 'allow_blank': True, 'allow_null': True},
             'promovido_al_grado': {'required': False, 'allow_blank': True, 'allow_null': True},
             'grado_cursado': {'required': False, 'allow_blank': True, 'allow_null': True},
             'lugar_expedicion': {'required': False, 'allow_blank': True, 'allow_null': True},
