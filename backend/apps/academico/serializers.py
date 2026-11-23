@@ -55,9 +55,12 @@ class DireccionAnidadaSerializer(serializers.Serializer):
 
 
 class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(source='id_config', read_only=True)
+
     class Meta:
         model = ConfiguracionAsistenciaPublica
         fields = (
+            "id",
             "id_config",
             "activo",
             "token_acceso",
@@ -67,6 +70,8 @@ class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
             "fecha_creacion",
         )
         read_only_fields = (
+            "id",
+            "id_config",
             "fecha_vigencia_inicio",
             "fecha_vigencia_fin",
             "fecha_creacion",
@@ -1136,18 +1141,6 @@ class ConstanciaProsecucionFinalSerializer(serializers.ModelSerializer):
                     ]
                 }
             )
-
-
-class ConfiguracionAsistenciaPublicaSerializer(serializers.ModelSerializer):
-    """
-    Serializer para la configuración de asistencia pública.
-    Solo lectura para el token_acceso (se autogenera en el modelo).
-    """
-
-    class Meta:
-        model = ConfiguracionAsistenciaPublica
-        fields = ['id_config', 'activo', 'token_acceso', 'fecha_creacion']
-        read_only_fields = ['id_config', 'token_acceso', 'fecha_creacion']
 
 
 class GrupoPublicoSerializer(serializers.Serializer):

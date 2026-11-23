@@ -53,7 +53,9 @@ axiosInstance.interceptors.response.use(
         } catch (refreshError) {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
-          if (window.location.pathname !== '/login') {
+          const isPublic = ['/login', '/recuperar-contrasena', '/inscripcion-externa', '/asistencia-publica', '/externo']
+            .some(p => window.location.pathname.startsWith(p));
+          if (!isPublic) {
             window.location.href = '/login';
           }
           return Promise.reject(refreshError);
@@ -62,7 +64,9 @@ axiosInstance.interceptors.response.use(
 
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
-      if (window.location.pathname !== '/login') {
+      const isPublic = ['/login', '/recuperar-contrasena', '/inscripcion-externa', '/asistencia-publica', '/externo']
+        .some(p => window.location.pathname.startsWith(p));
+      if (!isPublic) {
         window.location.href = '/login';
       }
     }

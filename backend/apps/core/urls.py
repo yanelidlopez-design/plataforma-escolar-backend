@@ -38,5 +38,6 @@ urlpatterns = [
     path('asistencia/link/', asistencia_publica_link, name='asistencia-publica-link'),
     path('asistencia/<str:token>/', asistencia_publica_redirect, name='asistencia-publica-redirect'),
     path('asistencia-publica/publico/<str:token>/', asistencia_publica_token, name='asistencia-publica-token'),
+    path('asistencia-publica/publico/', asistencia_publica_token, name='asistencia-publica-token-query'),
     path('', include(router.urls)),
 ]

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BarChart3, FileDown, Mail, GraduationCap } from 'lucide-react';
 import axiosInstance from '../api/axiosInstance';
 import { exportarEstadisticaMensualPDF } from '../api/asistencias';
-import { exportarConstanciasLotePDF } from '../api/prosecucion';
+import { exportarConstanciasLoteXLSX } from '../api/prosecucion';
 import { downloadFile } from '../utils/downloadFile';
 
 const mesActual = () => {
@@ -119,12 +119,12 @@ export default function Reportes() {
     setGenerandoLote(true);
     setError('');
     try {
-      const response = await exportarConstanciasLotePDF({
+      const response = await exportarConstanciasLoteXLSX({
         grado: filtrosConstancia.grado,
         seccion: filtrosConstancia.seccion,
         periodo: filtrosConstancia.periodo,
       });
-      const filename = `constancias_procesion_${filtrosConstancia.periodo}_grado${filtrosConstancia.grado}_sec${filtrosConstancia.seccion}.pdf`;
+      const filename = `constancias_procesion_${filtrosConstancia.periodo}_grado${filtrosConstancia.grado}_sec${filtrosConstancia.seccion}.xlsx`;
       await downloadFile(response, filename);
     } catch (reportError) {
       console.error('Error al exportar constancias en lote:', reportError);
@@ -259,7 +259,7 @@ export default function Reportes() {
             Constancias de Prosecución (Educación Primaria)
           </h2>
           <p className="mt-1 text-sm text-gray-500">
-            Genera un PDF multipágina con una constancia por estudiante del grado y sección seleccionados.
+            Genera un Excel multipestaña con una constancia por estudiante del grado y sección seleccionados.
           </p>
         </div>
 
@@ -330,7 +330,7 @@ export default function Reportes() {
               className="btn-primary flex items-center gap-2 w-full"
             >
               <Mail className="h-4 w-4" />
-              {generandoLote ? 'Generando...' : 'Exportar PDF Lote'}
+              {generandoLote ? 'Generando...' : 'Exportar Excel Lote'}
             </button>
           </div>
         </div>

@@ -45,6 +45,8 @@ from ..reports import (
 from ..reports_procesion import (
     generar_pdf_constancia_procesion,
     generar_constancias_lote_pdf as _generar_constancias_lote_pdf,
+    generar_xlsx_constancia_procesion,
+    generar_xlsx_constancias_lote,
 )
 
 logger = logging.getLogger(__name__)
@@ -305,3 +307,88 @@ class ReportesService:
             )
             raise ReporteError('No se pudo generar el lote de constancias PDF.')
         return pdf_buffer, filename
+
+    @classmethod
+    def generar_constancia_prosecucion_xlsx(
+        cls,
+        alumno_id: int,
+        periodo_id: Optional[int] = None,
+    ) -> Tuple[io.BytesIO, str]:
+        """
+        Prepara el XLSX de la Constancia de Prosecución Final (boleta de Julio).
+
+        Misma lógica de resolución que ``generar_constancia_prosecucion``,
+        pero retorna un libro de Excel listo para imprimir.
+
+        Excepciones de dominio: ``AlumnoNoEncontradoError`` y
+        ``ConstanciaNoEncontradaError`` (404), ``ReporteError`` (500).
+        """
+        del periodo_id
+
+        try:
+            alumno = Alumnos.objects.get(pk=alumno_id)
+        except Alumnos.DoesNotExist:
+            raise AlumnoNoEncontradoError()
+        except Exception:
+            logger.debug(
+                'Error buscando alumno para constancia XLSX: id=%s', alumno_id,
+                exc_info=True,
+            )
+            raise ReporteError('Error al buscar el alumno.')
+
+        anio_escolar = cls.resolver_anio_escolar_activo()
+
+        try:
+            queryset = ConstanciaProsecucionFinal.objects.filter(alumno=alumno)
+            constancia = None
+            if anio_escolar:
+                constancia = queryset.filter(periodo_escolar=anio_escolar).first()
+            if constancia is None:
+                constancia = queryset.order_by('-fecha_expedicion', '-id').first()
+        except Exception:
+            logger.debug(
+                'Error buscando constancia del alumno id=%s (año escolar %s)',
+                alumno_id, anio_escolar, exc_info=True,
+            )
+            raise ReporteError('Error al buscar la constancia.')
+
+        if constancia is None:
+            logger.debug(
+                'Constancia no encontrada: alumno id=%s año escolar=%s',
+                alumno_id, anio_escolar, exc_info=True,
+            )
+            raise ConstanciaNoEncontradaError()
+
+        try:
+            xlsx_buffer, filename = generar_xlsx_constancia_procesion(
+                alumno, constancia,
+            )
+        except Exception:
+            logger.debug(
+                'Error generando XLSX de constancia alumno=%s constancia=%s',
+                alumno_id, getattr(constancia, 'pk', None), exc_info=True,
+            )
+            raise ReporteError('No se pudo generar la constancia XLSX.')
+
+        return xlsx_buffer, filename
+
+    @classmethod
+    def generar_constancias_lote_xlsx(
+        cls,
+        constancias_queryset,
+    ) -> Tuple[io.BytesIO, str]:
+        """
+        Genera un XLSX con una pestaña por cada alumno del queryset.
+
+        Retorna (io.BytesIO, filename).
+        """
+        try:
+            xlsx_buffer, filename = generar_xlsx_constancias_lote(
+                constancias_queryset,
+            )
+        except Exception:
+            logger.debug(
+                'Error generando constancias en lote XLSX', exc_info=True,
+            )
+            raise ReporteError('No se pudo generar el lote de constancias XLSX.')
+        return xlsx_buffer, filename

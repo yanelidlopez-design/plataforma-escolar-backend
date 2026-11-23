@@ -341,30 +341,37 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
     """
     queryset = ConfiguracionAsistenciaPublica.objects.all()
     serializer_class = ConfiguracionAsistenciaPublicaSerializer
-    permission_classes = [permissions.IsAuthenticated, permissions.IsAdminUser]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 @swagger_auto_schema(method='get', tags=['Asistencia Pública'])
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([permissions.AllowAny])
-def asistencia_publica_token(request, token):
+def asistencia_publica_token(request, token=None):
     """Endpoint público para verificar un token de asistencia pública.
     - Busca la ConfiguracionAsistenciaPublica con ese token_acceso.
     - Si no existe o está inactiva, responde 404.
     - Retorna los datos básicos del enlace (fecha_dia, activo, token_acceso).
     """
+    tok = token or request.query_params.get('token')
+    if not tok:
+        return Response({'detail': 'Token de asistencia requerido.'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        config = ConfiguracionAsistenciaPublica.objects.get(token_acceso=token)
+        config = ConfiguracionAsistenciaPublica.objects.get(token_acceso=tok)
     except ConfiguracionAsistenciaPublica.DoesNotExist:
-        return Response({'detail': 'Enlace de asistencia no encontrado o inactivo.'}, status=404)
+        return Response({'detail': 'Enlace de asistencia no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not config.activo:
+        return Response({'detail': 'El formulario de asistencia se encuentra cerrado temporalmente.'}, status=status.HTTP_404_NOT_FOUND)
 
     return Response({
         'id': config.id,
         'token_acceso': config.token_acceso,
-        'fecha_dia': config.fecha_dia,
+        'fecha_dia': str(config.fecha_dia),
         'activo': config.activo,
-    })
+    }, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(method='get', tags=['Asistencia Pública'])

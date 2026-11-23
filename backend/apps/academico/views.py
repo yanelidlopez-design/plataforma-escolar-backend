@@ -1348,6 +1348,7 @@ class InscripcionDocenteExternaAPIView(APIView):
     Valida un token de acceso seguro y el estado del periodo de inscripción
     antes de crear el alumno y su inscripción.
     """
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
     serializer_class = AlumnoInscripcionSerializer
 
@@ -1559,22 +1560,38 @@ class PeriodoInscripcionListCreateAPIView(ListCreateAPIView):
 
 
 class PeriodoInscripcionPublicoAPIView(APIView):
+    authentication_classes = []
     permission_classes = [permissions.AllowAny]
 
-    def get(self, request, token, *args, **kwargs):
+    def get(self, request, token=None, *args, **kwargs):
+        tok = token or request.query_params.get('token')
+        if not tok:
+            return Response(
+                {'detail': 'Token de acceso requerido.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            periodo = PeriodoInscripcion.objects.get(token_acceso=token)
+            periodo = PeriodoInscripcion.objects.get(token_acceso=tok)
         except PeriodoInscripcion.DoesNotExist:
             return Response(
                 {'detail': 'El enlace de inscripción no existe.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+        if not periodo.activo_manual:
+            return Response(
+                {'detail': 'El formulario de inscripción se encuentra cerrado temporalmente.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
         return Response({
+            'id': periodo.id,
             'nombre': periodo.nombre,
             'fecha_inicio': periodo.fecha_inicio,
             'fecha_fin': periodo.fecha_fin,
             'activo_manual': periodo.activo_manual,
-        })
+            'activo': periodo.activo_manual,
+        }, status=status.HTTP_200_OK)
 
 
 class PeriodoInscripcionDetailAPIView(RetrieveUpdateDestroyAPIView):
@@ -2170,22 +2187,22 @@ class RegistrarConstanciaProsecucionAPIView(APIView):
 class DescargaConstanciaProsecucionAPIView(APIView):
     """
     Endpoint administrativo para descargar la Constancia de Prosecución Final
-    (boleta oficial única de Julio) en PDF.
+    (boleta oficial única de Julio) en Excel (.xlsx).
 
-    - GET /api/academico/calificaciones/prosecucion-final-pdf/<int:alumno_id>/
+    - GET /api/academico/calificaciones/prosecucion-final-xlsx/<int:alumno_id>/
 
     Recupera al alumno y su constancia correspondiente al año escolar actual
-    (periodo académico activo en ``periodos_academicos``) y delega el
-    renderizado al motor de ReportLab. Requiere autenticación JWT
-    (IsAuthenticated): uso exclusivo del personal administrativo y de la
-    Dirección de la escuela desde la plataforma escolar.
+    (periodo académico activo en ``periodos_academicos``) y genera un libro
+    de Excel listo para imprimir, con espacio reservado en la parte superior
+    para pegar el logo del Ministerio y el escudo regional. Requiere
+    autenticación JWT (IsAuthenticated).
     """
 
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, alumno_id, *args, **kwargs):
         try:
-            pdf_buffer, filename = ReportesService.generar_constancia_prosecucion(
+            xlsx_buffer, filename = ReportesService.generar_constancia_prosecucion_xlsx(
                 alumno_id,
             )
         except (AlumnoNoEncontradoError, ConstanciaNoEncontradaError) as exc:
@@ -2200,8 +2217,8 @@ class DescargaConstanciaProsecucionAPIView(APIView):
             )
 
         response = FileResponse(
-            pdf_buffer,
-            content_type='application/pdf',
+            xlsx_buffer,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
@@ -2589,13 +2606,13 @@ class ExportarConstanciasLoteAPIView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            pdf_buffer, filename = ReportesService.generar_constancias_lote_pdf(
+            xlsx_buffer, filename = ReportesService.generar_constancias_lote_xlsx(
                 constancias,
             )
 
             response = FileResponse(
-                pdf_buffer,
-                content_type='application/pdf',
+                xlsx_buffer,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             )
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             return response

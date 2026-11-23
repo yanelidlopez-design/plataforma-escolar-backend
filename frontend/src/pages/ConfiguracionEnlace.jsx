@@ -81,6 +81,57 @@ export default function ConfiguracionEnlace() {
     }
   };
 
+  const formatearFecha = (fechaStr) => {
+    if (!fechaStr) return 'N/A';
+    try {
+      const d = new Date(fechaStr.includes('T') ? fechaStr : `${fechaStr}T12:00:00`);
+      if (isNaN(d.getTime())) return fechaStr;
+      return d.toLocaleDateString('es-ES', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    } catch {
+      return fechaStr;
+    }
+  };
+
+  const handleEliminarInscripcion = async (id) => {
+    if (!window.confirm('¿Está seguro de que desea eliminar este enlace de inscripción?')) {
+      return;
+    }
+    try {
+      await deleteUrlExterna(id);
+      setInscripcionUrls((prev) => prev.filter((u) => u.id !== id));
+      toast.success('Enlace de inscripción eliminado correctamente');
+    } catch (err) {
+      console.error('Error al eliminar enlace de inscripción:', err);
+      toast.error('Error al eliminar el enlace de inscripción');
+    }
+  };
+
+  const handleEliminarAsistencia = async (enlace) => {
+    const id = enlace.id || enlace.id_config;
+    if (!id) {
+      toast.error('No se pudo identificar el enlace a eliminar.');
+      return;
+    }
+    if (!window.confirm('¿Está seguro de que desea eliminar este enlace de asistencia?')) {
+      return;
+    }
+    try {
+      await eliminarEnlaceAsistencia(id);
+      setAsistenciaEnlaces((prev) => prev.filter((e) => (e.id || e.id_config) !== id));
+      if (enlaceActivoHoy && (enlaceActivoHoy.id === id || enlaceActivoHoy.id_config === id)) {
+        setEnlaceActivoHoy(null);
+      }
+      toast.success('Enlace de asistencia pública eliminado correctamente');
+    } catch (err) {
+      console.error('Error al eliminar enlace de asistencia:', err);
+      toast.error(err.response?.data?.detail || 'Error al eliminar el enlace de asistencia');
+    }
+  };
+
   if (loadingInscripcion && loadingAsistencia) {
     return <div className="p-6 text-center text-gray-500">Cargando enlaces...</div>;
   }
@@ -189,7 +240,7 @@ export default function ConfiguracionEnlace() {
                         });
                         setModalOpen(true);
                       }} className="text-blue-600 hover:underline text-sm">Editar</button>
-                      <button onClick={() => { if (confirm('¿Eliminar?')) { deleteUrlExterna(url.id).then(() => { toast.success('Enlace de inscripción eliminado'); setInscripcionUrls(prev => prev.filter(u => u.id !== url.id)); }).catch(() => toast.error('Error al eliminar el enlace')); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                      <button onClick={() => handleEliminarInscripcion(url.id)} className="text-red-600 hover:underline text-sm">Eliminar</button>
                     </div>
                   </div>
                 );
@@ -238,7 +289,7 @@ export default function ConfiguracionEnlace() {
                         Enlace activo de asistencia para hoy
                       </div>
                       <div className="text-xs text-blue-700 mt-1">
-                        Fecha: {enlaceActivoHoy.fecha_dia || 'N/A'}
+                        Fecha: {formatearFecha(enlaceActivoHoy.fecha_dia || enlaceActivoHoy.fecha_creacion)}
                       </div>
                     </div>
                   </div>
@@ -275,11 +326,12 @@ export default function ConfiguracionEnlace() {
               )}
               <div className="space-y-2">
                 {asistenciaEnlaces.map((enlace) => {
+                  const enlaceId = enlace.id || enlace.id_config;
                   const urlCompleta = `${window.location.origin}/asistencia-publica/${enlace.token_acceso}`;
                   return (
-                    <div key={enlace.id} className="border p-3 rounded bg-white">
+                    <div key={enlaceId || enlace.token_acceso} className="border p-3 rounded bg-white">
                       <div className="text-sm text-gray-600">
-                        Fecha: {enlace.fecha_dia || 'N/A'}
+                        Fecha: {formatearFecha(enlace.fecha_dia || enlace.fecha_creacion || enlace.created_at)}
                       </div>
                       <div className="text-sm text-gray-600">
                         Estado: {enlace.activo ? 'Activo' : 'Inactivo'}
@@ -314,7 +366,7 @@ export default function ConfiguracionEnlace() {
                       </div>
                       <div className="flex gap-2 mt-2">
                         <button onClick={() => {
-                          setEditingId(enlace.id); setType('asistencia');
+                          setEditingId(enlaceId); setType('asistencia');
                           setInscripcionData({
                             nombre: enlace.nombre || `Asistencia ${enlace.fecha_dia || ''}`,
                             fecha_inicio: enlace.fecha_dia ? new Date(enlace.fecha_dia).toISOString().slice(0, 16) : '',
@@ -324,7 +376,7 @@ export default function ConfiguracionEnlace() {
                           });
                           setModalOpen(true);
                         }} className="text-blue-600 hover:underline text-sm">Editar</button>
-                        <button onClick={() => { if (confirm('¿Eliminar?')) { eliminarEnlaceAsistencia(enlace.id).then(() => { toast.success('Enlace de asistencia eliminado'); setAsistenciaEnlaces(prev => prev.filter(e => e.id !== enlace.id)); if (enlaceActivoHoy?.id === enlace.id) setEnlaceActivoHoy(null); }).catch(() => toast.error('Error al eliminar el enlace')); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                        <button onClick={() => handleEliminarAsistencia(enlace)} className="text-red-600 hover:underline text-sm">Eliminar</button>
                       </div>
                     </div>
                   );

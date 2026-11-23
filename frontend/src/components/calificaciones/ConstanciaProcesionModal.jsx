@@ -9,7 +9,7 @@ import {
   actualizarConfiguracionInstitucional,
   getConstanciaProsecucionAlumno,
   guardarConstanciaProsecucionAlumno,
-  descargarConstanciaProcesionPDF,
+  descargarConstanciaProcesionXLSX,
 } from '../../api/prosecucion';
 
 const GRADOS_CURSADO = [
@@ -193,23 +193,23 @@ export default function ConstanciaProcesionModal({
     }
   };
 
-  const handleDescargarPDF = async () => {
+  const handleDescargarXLSX = async () => {
     if (!alumno?.id_alumno) return;
     setDescargando(true);
     setError('');
     try {
-      const response = await descargarConstanciaProcesionPDF(alumno.id_alumno);
-      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const response = await descargarConstanciaProcesionXLSX(alumno.id_alumno);
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Constancia_Procesion_${alumno.cedula_escolar || alumno.id_alumno}.pdf`;
+      a.download = `Constancia_Prosecucion_${alumno.cedula_escolar || alumno.id_alumno}.xlsx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (e) {
-      setError(e.response?.data?.detail || e.response?.data?.error || JSON.stringify(e.response?.data) || e.message || 'No se pudo descargar el PDF.');
+      setError(e.response?.data?.detail || e.response?.data?.error || JSON.stringify(e.response?.data) || e.message || 'No se pudo descargar el Excel.');
     } finally {
       setDescargando(false);
     }
@@ -349,11 +349,11 @@ export default function ConstanciaProcesionModal({
           </button>
           {existeConstancia && (
             <button
-              onClick={handleDescargarPDF}
+              onClick={handleDescargarXLSX}
               disabled={descargando}
               className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 text-sm"
             >
-              <FileDown className="w-4 h-4" /> Descargar PDF Individual
+              <FileDown className="w-4 h-4" /> Descargar Excel Individual
             </button>
           )}
         </div>

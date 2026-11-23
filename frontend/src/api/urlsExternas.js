@@ -15,4 +15,4 @@ export const alternarEstadoUrlExterna = (id, activo_manual) =>
   axiosInstance.patch(`/academico/periodos/${id}/alternar-estado/`, { activo_manual });
 export const deleteUrlExterna = (id) => axiosInstance.delete(`/academico/periodos/${id}/`);
 export const getUrlExternaPublica = (token) =>
-  axiosInstance.get(`/academico/periodos/publicos/${token}/`);
+  axiosInstance.get(`/academico/periodos/publico/${token}/`);

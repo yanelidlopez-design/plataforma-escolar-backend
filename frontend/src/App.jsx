@@ -10,12 +10,13 @@ import ConfiguracionEnlace from './pages/ConfiguracionEnlace';
 import Reportes from './pages/Reportes';
 import Login from './pages/Login';
 import RecuperarContrasena from './pages/RecuperarContrasena';
+import InscripcionExterna from './pages/InscripcionExterna';
+import AsistenciaPublica from './pages/AsistenciaPublica';
 import UrlExternaPublica from './components/urlsExternas/UrlExternaPublica';
-import AsistenciaPublicaPublica from './components/urlsExternas/AsistenciaPublicaPublica';
 
 /**
  * App - Componente raíz con las rutas de la aplicación.
- * - Rutas públicas: /login, /externo/:slug (formularios externos sin autenticación)
+ * - Rutas públicas: /login, /recuperar-contrasena, /inscripcion-externa/:token, /asistencia-publica/:token
  * - Rutas protegidas: /admin/dashboard/* (requieren autenticación JWT)
  */
 function App() {
@@ -28,23 +29,16 @@ function App() {
 
   return (
     <Routes>
-      {/* Ruta pública de login */}
+      {/* Rutas públicas de autenticación */}
       <Route path="/login" element={<Login />} />
       <Route path="/recuperar-contrasena" element={<RecuperarContrasena />} />
 
-      {
-        /* Ruta pública para formularios externos.
-         * Si la URL externa está INACTIVA (OFF) o expirada, renderiza
-         * UrlCerradaView con el mensaje "Este formulario se encuentra cerrado temporalmente".
-         */
-      }
+      {/* Rutas públicas para formularios externos (accesibles sin login) */}
       <Route path="/externo/:slug" element={<UrlExternaPublica />} />
-      <Route path="/inscripcion-externa/:token" element={<UrlExternaPublica />} />
-      <Route path="/asistencia-publica/:token" element={<AsistenciaPublicaPublica />} />
+      <Route path="/inscripcion-externa/:token" element={<InscripcionExterna />} />
+      <Route path="/asistencia-publica/:token" element={<AsistenciaPublica />} />
 
-      {
-        /* Rutas protegidas del panel admin bajo /admin/dashboard/* */
-      }
+      {/* Rutas protegidas del panel admin bajo /admin/dashboard/* */}
       <Route
         path="/admin/dashboard/*"
         element={

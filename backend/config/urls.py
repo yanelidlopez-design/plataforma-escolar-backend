@@ -37,14 +37,14 @@ if settings.DEBUG:
         path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     ]
 
-if settings.FRONTEND_DIST_DIR.is_dir():
-    urlpatterns += [
-        re_path(
-            r'^(?!api(?:/|$)|django-admin(?:/|$)|static(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
-            serve_frontend,
-            name='frontend-spa',
-        ),
-    ]
+# Catch-all comodín para la SPA de React: entrega index.html para cualquier ruta pública (SPA)
+urlpatterns += [
+    re_path(
+        r'^(?!api/|django-admin/|static/|media/|swagger/|redoc/).*$',
+        serve_frontend,
+        name='frontend-spa',
+    ),
+]
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
