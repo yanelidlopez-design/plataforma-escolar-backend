@@ -37,6 +37,7 @@ function App() {
       <Route path="/externo/:slug" element={<UrlExternaPublica />} />
       <Route path="/inscripcion-externa/:token" element={<InscripcionExterna />} />
       <Route path="/asistencia-publica/:token" element={<AsistenciaPublica />} />
+      <Route path="/asistencia/:token" element={<AsistenciaPublica />} />
 
       {/* Rutas protegidas del panel admin bajo /admin/dashboard/* */}
       <Route

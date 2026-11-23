@@ -1,3 +1,5 @@
+import logging
+import secrets
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -334,14 +336,88 @@ class UsuariosViewSet(viewsets.ModelViewSet):
         return Response({'detail': 'Contraseña actualizada correctamente.'})
 
 
+logger = logging.getLogger(__name__)
+
+
 @swagger_auto_schema(tags=['Configuración Asistencia Pública'])
 class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
     """CRUD para la configuración de enlace público de asistencia.
-    Sólo admin (staff) puede crear/editar. Lectura pública restringida a usuarios autenticados.
+    Automatiza la generación diaria del enlace activo de asistencia.
     """
     queryset = ConfiguracionAsistenciaPublica.objects.all()
     serializer_class = ConfiguracionAsistenciaPublicaSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def _asegurar_enlace_hoy(self):
+        """Verifica si ya existe un enlace activo para hoy. Si no, lo crea automáticamente."""
+        today = timezone.localdate()
+        try:
+            # Desactivar enlaces activos de fechas pasadas
+            ConfiguracionAsistenciaPublica.objects.filter(fecha_dia__lt=today, activo=True).update(activo=False)
+
+            enlace_hoy = ConfiguracionAsistenciaPublica.objects.filter(fecha_dia=today, activo=True).first()
+            if not enlace_hoy:
+                existente = ConfiguracionAsistenciaPublica.objects.filter(fecha_dia=today).first()
+                if existente:
+                    existente.activo = True
+                    if not existente.token_acceso:
+                        existente.token_acceso = secrets.token_urlsafe(32)
+                    existente.save()
+                    return existente
+                else:
+                    return ConfiguracionAsistenciaPublica.objects.create(
+                        fecha_dia=today,
+                        activo=True,
+                        token_acceso=secrets.token_urlsafe(32),
+                    )
+            return enlace_hoy
+        except Exception as exc:
+            logger.warning('No se pudo auto-generar enlace de asistencia de hoy: %s', exc)
+            return None
+
+    def list(self, request, *args, **kwargs):
+        """
+        Al listar los enlaces de asistencia pública:
+        1. Verifica si ya existe un enlace activo para hoy (timezone.localdate()).
+        2. Si no existe, lo crea automáticamente con activo=True y token seguro.
+        3. Devuelve el listado actualizado.
+        """
+        self._asegurar_enlace_hoy()
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        """
+        Crea o regenera el enlace activo de hoy con valores por defecto
+        sin exigir formato de fecha ni fallar por validaciones manuales.
+        """
+        today = timezone.localdate()
+        token_nuevo = secrets.token_urlsafe(32)
+
+        try:
+            ConfiguracionAsistenciaPublica.objects.filter(fecha_dia__lt=today, activo=True).update(activo=False)
+            config = ConfiguracionAsistenciaPublica.objects.filter(fecha_dia=today).first()
+            if config:
+                config.activo = True
+                config.token_acceso = token_nuevo
+                config.save()
+                created = False
+            else:
+                config = ConfiguracionAsistenciaPublica.objects.create(
+                    fecha_dia=today,
+                    activo=True,
+                    token_acceso=token_nuevo,
+                )
+                created = True
+            serializer = self.get_serializer(config)
+            return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+        except Exception as exc:
+            logger.warning('Fallo en creación automática de enlace de asistencia: %s', exc)
+            return super().create(request, *args, **kwargs)
+
+    @action(detail=False, methods=['post'], url_path='regenerar')
+    def regenerar(self, request):
+        """Regenera el token para hoy e invalida el anterior."""
+        return self.create(request)
 
 
 @swagger_auto_schema(method='get', tags=['Asistencia Pública'])
@@ -367,8 +443,10 @@ def asistencia_publica_token(request, token=None):
         return Response({'detail': 'El formulario de asistencia se encuentra cerrado temporalmente.'}, status=status.HTTP_404_NOT_FOUND)
 
     return Response({
-        'id': config.id,
+        'id': config.pk,
+        'id_config': config.pk,
         'token_acceso': config.token_acceso,
+        'token': config.token_acceso,
         'fecha_dia': str(config.fecha_dia),
         'activo': config.activo,
     }, status=status.HTTP_200_OK)

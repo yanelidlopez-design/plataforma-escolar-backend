@@ -43,6 +43,11 @@ export const obtenerEnlaceActivo = () => {
   return axiosInstance.get('/core/asistencia/link/');
 };
 
+// Regenerar automáticamente el token del enlace activo de hoy
+export const regenerarEnlaceAsistencia = () => {
+  return axiosInstance.post('/core/asistencia-publica/');
+};
+
 // Verificar un token público de asistencia (sin autenticación)
 export const getAsistenciaPublicaToken = (token) => {
   return axiosInstance.get(`/core/asistencia-publica/publico/${token}/`);
