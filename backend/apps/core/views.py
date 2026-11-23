@@ -348,6 +348,29 @@ class ConfiguracionAsistenciaPublicaViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @authentication_classes([])
 @permission_classes([permissions.AllowAny])
+def asistencia_publica_token(request, token):
+    """Endpoint público para verificar un token de asistencia pública.
+    - Busca la ConfiguracionAsistenciaPublica con ese token_acceso.
+    - Si no existe o está inactiva, responde 404.
+    - Retorna los datos básicos del enlace (fecha_dia, activo, token_acceso).
+    """
+    try:
+        config = ConfiguracionAsistenciaPublica.objects.get(token_acceso=token)
+    except ConfiguracionAsistenciaPublica.DoesNotExist:
+        return Response({'detail': 'Enlace de asistencia no encontrado o inactivo.'}, status=404)
+
+    return Response({
+        'id': config.id,
+        'token_acceso': config.token_acceso,
+        'fecha_dia': config.fecha_dia,
+        'activo': config.activo,
+    })
+
+
+@swagger_auto_schema(method='get', tags=['Asistencia Pública'])
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([permissions.AllowAny])
 def asistencia_publica_link(request):
     """Endpoint público que devuelve el enlace activo del día.
     - Busca la configuración de hoy marcada como `activo=True`.

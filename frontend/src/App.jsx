@@ -11,7 +11,7 @@ import Reportes from './pages/Reportes';
 import Login from './pages/Login';
 import RecuperarContrasena from './pages/RecuperarContrasena';
 import UrlExternaPublica from './components/urlsExternas/UrlExternaPublica';
-import AsistenciaPublica from './components/urlsExternas/UrlExternaPublica';
+import AsistenciaPublicaPublica from './components/urlsExternas/AsistenciaPublicaPublica';
 
 /**
  * App - Componente raíz con las rutas de la aplicación.
@@ -40,7 +40,7 @@ function App() {
       }
       <Route path="/externo/:slug" element={<UrlExternaPublica />} />
       <Route path="/inscripcion-externa/:token" element={<UrlExternaPublica />} />
-      <Route path="/asistencia-publica/:token" element={<AsistenciaPublica />} />
+      <Route path="/asistencia-publica/:token" element={<AsistenciaPublicaPublica />} />
 
       {
         /* Rutas protegidas del panel admin bajo /admin/dashboard/* */

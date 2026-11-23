@@ -42,3 +42,8 @@ export const obtenerEnlacePorFecha = (fecha) => {
 export const obtenerEnlaceActivo = () => {
   return axiosInstance.get('/core/asistencia/link/');
 };
+
+// Verificar un token público de asistencia (sin autenticación)
+export const getAsistenciaPublicaToken = (token) => {
+  return axiosInstance.get(`/core/asistencia-publica/publico/${token}/`);
+};

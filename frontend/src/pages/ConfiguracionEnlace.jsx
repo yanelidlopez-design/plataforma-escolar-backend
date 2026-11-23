@@ -189,7 +189,7 @@ export default function ConfiguracionEnlace() {
                         });
                         setModalOpen(true);
                       }} className="text-blue-600 hover:underline text-sm">Editar</button>
-                      <button onClick={() => { if (confirm('¿Eliminar?')) { deleteUrlExterna(url.id).then(() => cargarDatos()); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                      <button onClick={() => { if (confirm('¿Eliminar?')) { deleteUrlExterna(url.id).then(() => { toast.success('Enlace de inscripción eliminado'); setInscripcionUrls(prev => prev.filter(u => u.id !== url.id)); }).catch(() => toast.error('Error al eliminar el enlace')); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
                     </div>
                   </div>
                 );
@@ -324,7 +324,7 @@ export default function ConfiguracionEnlace() {
                           });
                           setModalOpen(true);
                         }} className="text-blue-600 hover:underline text-sm">Editar</button>
-                        <button onClick={() => { if (confirm('¿Eliminar?')) { eliminarEnlaceAsistencia(enlace.id).then(() => cargarDatos()); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
+                        <button onClick={() => { if (confirm('¿Eliminar?')) { eliminarEnlaceAsistencia(enlace.id).then(() => { toast.success('Enlace de asistencia eliminado'); setAsistenciaEnlaces(prev => prev.filter(e => e.id !== enlace.id)); if (enlaceActivoHoy?.id === enlace.id) setEnlaceActivoHoy(null); }).catch(() => toast.error('Error al eliminar el enlace')); } }} className="text-red-600 hover:underline text-sm">Eliminar</button>
                       </div>
                     </div>
                   );

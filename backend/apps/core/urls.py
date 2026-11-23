@@ -12,6 +12,7 @@ from .views import (
     ConfiguracionAsistenciaPublicaViewSet,
     asistencia_publica_link,
     asistencia_publica_redirect,
+    asistencia_publica_token,
     CustomTokenObtainPairView,
     custom_token_logout,
     solicitar_restauracion_contrasena,
@@ -36,5 +37,6 @@ urlpatterns = [
     path('password-reset/confirm/', confirmar_restauracion_contrasena, name='confirmar-restauracion-contrasena'),
     path('asistencia/link/', asistencia_publica_link, name='asistencia-publica-link'),
     path('asistencia/<str:token>/', asistencia_publica_redirect, name='asistencia-publica-redirect'),
+    path('asistencia-publica/publico/<str:token>/', asistencia_publica_token, name='asistencia-publica-token'),
     path('', include(router.urls)),
 ]

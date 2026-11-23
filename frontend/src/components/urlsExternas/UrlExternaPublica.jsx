@@ -17,7 +17,9 @@ import { getUrlExternaPublica } from '../../api/urlsExternas';
  * Ruta: /externo/:slug  (pública, no requiere autenticación)
  */
 export default function UrlExternaPublica() {
-  const { slug } = useParams();
+  const { slug, token } = useParams();
+  // Support both /externo/:slug and /inscripcion-externa/:token routes
+  const tokenValue = slug || token;
   const navigate = useNavigate();
   const [urlExterna, setUrlExterna] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export default function UrlExternaPublica() {
   useEffect(() => {
     const verificarUrl = async () => {
       try {
-        const response = await getUrlExternaPublica(slug);
+        const response = await getUrlExternaPublica(tokenValue);
         setUrlExterna(response.data);
         setError(null);
       } catch (err) {
@@ -38,7 +40,7 @@ export default function UrlExternaPublica() {
       }
     };
     verificarUrl();
-  }, [slug]);
+  }, [tokenValue]);
 
   if (loading) {
     return (
@@ -53,13 +55,13 @@ export default function UrlExternaPublica() {
 
   // URL no encontrada en el sistema
   if (!urlExterna || error) {
-    return <UrlCerradaView slug={slug} />;
+    return <UrlCerradaView slug={tokenValue} />;
   }
 
   // URL encontrada pero inactiva o expirada
   const estaExpirada = urlExterna.fecha_fin && new Date(urlExterna.fecha_fin) < new Date();
   if (!urlExterna.activo_manual || estaExpirada) {
-    return <UrlCerradaView slug={slug} />;
+    return <UrlCerradaView slug={tokenValue} />;
   }
 
   return (
@@ -99,7 +101,7 @@ export default function UrlExternaPublica() {
 
           <div className="mt-6 pt-6 border-t border-gray-200">
             <p className="text-xs text-gray-500">
-              <strong>Enlace:</strong> /externo/{slug}<br />
+              <strong>Enlace:</strong> /externo/{tokenValue}<br />
               <strong>Estado:</strong> <span className="text-green-600 font-medium">Activo</span><br />
               <strong>Expiración:</strong>{' '}
               {urlExterna.fecha_fin ? new Date(urlExterna.fecha_fin).toLocaleDateString('es-ES') : 'Sin expiración'}

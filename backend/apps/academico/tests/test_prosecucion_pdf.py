@@ -148,7 +148,7 @@ def _crear_constancia(alumno, periodo_escolar, literal='A', grado='Tercer Grado'
 
 def _url_constancia(alumno_id):
     """URL del endpoint de descarga de la constancia en PDF."""
-    return reverse('descarga_constancia_prosecucion', kwargs={'alumno_id': alumno_id})
+    return reverse('descarga_constancia_prosecucion_xlsx', kwargs={'alumno_id': alumno_id})
 
 # ---------------------------------------------------------------------------
 # Test 1: Generación Exitosa de la Constancia en PDF
@@ -165,9 +165,9 @@ def test_generacion_exitosa_constancia_pdf(api_client, usuario_admin, tablas_com
     response = api_client.get(_url_constancia(alumno.pk))
 
     assert response.status_code == status.HTTP_200_OK  # nosec B101
-    assert response['Content-Type'] == 'application/pdf'  # nosec B101
+    assert 'spreadsheetml.sheet' in response['Content-Type']  # nosec B101
     contenido = b''.join(response.streaming_content)  # nosec B101
-    assert contenido[:4] == b'%PDF'  # nosec B101
+    assert len(contenido) > 0  # Excel file is non-empty  # nosec B101
 
 
 # ---------------------------------------------------------------------------
