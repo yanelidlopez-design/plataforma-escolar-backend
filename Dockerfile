@@ -30,7 +30,7 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /app/static /app/media \
-    && python /app/backend/manage.py collectstatic --noinput
+    && DJANGO_SECRET_KEY=build-only-dummy-secret-key python /app/backend/manage.py collectstatic --noinput
 
 WORKDIR /app/backend
 
