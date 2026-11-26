@@ -442,6 +442,15 @@ def asistencia_publica_token(request, token=None):
     if not config.activo:
         return Response({'detail': 'El formulario de asistencia se encuentra cerrado temporalmente.'}, status=status.HTTP_404_NOT_FOUND)
 
+    nombre_institucion = 'Plataforma Escolar'
+    try:
+        from apps.core.models import ConfiguracionPlantel
+        plantel = ConfiguracionPlantel.objects.first()
+        if plantel and plantel.nombre_plantel:
+            nombre_institucion = plantel.nombre_plantel
+    except Exception:
+        pass
+
     return Response({
         'id': config.pk,
         'id_config': config.pk,
@@ -449,6 +458,7 @@ def asistencia_publica_token(request, token=None):
         'token': config.token_acceso,
         'fecha_dia': str(config.fecha_dia),
         'activo': config.activo,
+        'nombre_institucion': nombre_institucion,
     }, status=status.HTTP_200_OK)
 
 

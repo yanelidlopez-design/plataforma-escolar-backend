@@ -52,3 +52,22 @@ export const regenerarEnlaceAsistencia = () => {
 export const getAsistenciaPublicaToken = (token) => {
   return axiosInstance.get(`/core/asistencia-publica/publico/${token}/`);
 };
+
+// Endpoints públicos del módulo académico para tomar asistencia
+export const getGruposAsistenciaPublica = (token) => {
+  return axiosInstance.get('/academico/asistencia-publica/grupos/', {
+    params: { token },
+  });
+};
+
+export const getAlumnosAsistenciaPublica = (token, grupoId) => {
+  return axiosInstance.get('/academico/asistencia-publica/alumnos/', {
+    params: { token, grupo_id: grupoId },
+  });
+};
+
+export const registrarAsistenciaPublica = (token, payload) => {
+  return axiosInstance.post('/academico/asistencia-publica/registrar/', payload, {
+    params: { token },
+  });
+};
