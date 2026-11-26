@@ -7,6 +7,7 @@ from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework_simplejwt.views import TokenObtainPairView
 from apps.academico.tokens import MiTokenRefreshView
+from django.views.static import serve
 from config.views import serve_frontend
 
 schema_view = get_schema_view(
@@ -37,10 +38,20 @@ if settings.DEBUG:
         path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
     ]
 
+# Servir assets del frontend (/assets/...) explícitamente con su tipo MIME correcto
+urlpatterns += [
+    re_path(
+        r'^assets/(?P<path>.*)$',
+        serve,
+        {'document_root': str(settings.FRONTEND_DIST_DIR / 'assets')},
+        name='frontend-assets',
+    ),
+]
+
 # Catch-all comodín para la SPA de React: entrega index.html para cualquier ruta pública (SPA)
 urlpatterns += [
     re_path(
-        r'^(?!api/|django-admin/|static/|media/|swagger/|redoc/).*$',
+        r'^(?!api/|django-admin/|static/|assets/|media/|swagger/|redoc/).*$',
         serve_frontend,
         name='frontend-spa',
     ),

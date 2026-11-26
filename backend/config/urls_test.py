@@ -14,6 +14,7 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.views.static import serve
 from apps.academico.tokens import MiTokenRefreshView
 from config.views import serve_frontend
 
@@ -47,7 +48,13 @@ if settings.DEBUG:
 if hasattr(settings, 'FRONTEND_DIST_DIR') and settings.FRONTEND_DIST_DIR.is_dir():
     urlpatterns += [
         re_path(
-            r'^(?!api(?:/|$)|admin(?:/|$)|static(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
+            r'^assets/(?P<path>.*)$',
+            serve,
+            {'document_root': str(settings.FRONTEND_DIST_DIR / 'assets')},
+            name='frontend-assets',
+        ),
+        re_path(
+            r'^(?!api(?:/|$)|admin(?:/|$)|static(?:/|$)|assets(?:/|$)|media(?:/|$)|swagger(?:/|$)|redoc(?:/|$))(?P<path>.*)$',
             serve_frontend,
             name='frontend-spa',
         ),

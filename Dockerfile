@@ -29,7 +29,8 @@ COPY docker-entrypoint-initdb.sql /app/docker-entrypoint-initdb.sql
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
-    && mkdir -p /app/static /app/media
+    && mkdir -p /app/static /app/media \
+    && python /app/backend/manage.py collectstatic --noinput
 
 WORKDIR /app/backend
 

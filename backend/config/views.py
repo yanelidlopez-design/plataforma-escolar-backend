@@ -9,10 +9,9 @@ def serve_frontend(request: HttpRequest, path: str = '') -> HttpResponse:
     index_file = frontend_root / 'index.html'
 
     if path:
-        try:
+        target_file = frontend_root / path
+        if target_file.is_file():
             return serve(request, path, document_root=str(frontend_root))
-        except Http404:
-            pass
 
     if index_file.is_file():
         return serve(request, 'index.html', document_root=str(frontend_root))
