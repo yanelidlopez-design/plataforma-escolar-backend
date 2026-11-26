@@ -314,14 +314,14 @@ def generar_constancias_lote_pdf(constancias_queryset, lugar_expedicion_override
     story = []
 
     total = len(constancias)
-    for idx, constancia in enumerate(constancias):
+    for idx_inner, constancia in enumerate(constancias):
         alumno = constancia.alumno
         story.extend(
             _constancia_story(
                 alumno, constancia, estilos, lugar_expedicion_override
             )
         )
-        if idx < total - 1:
+        if idx_inner < total - 1:
             story.append(PageBreak())
 
     doc.build(story)
@@ -427,22 +427,22 @@ def _constancia_excel_body_text(alumno_objeto, constancia_objeto, datos_inst, lu
     lugar = lugar_expedicion_override or constancia_objeto.lugar_expedicion or '__________'
 
     cuerpo_texto = (
-        f'Quien suscribe {director_nombre}, titular de la Cédula de Identidad N° {director_cedula}, '
-        f'Director(a) de la Institución Educativa {nombre_plantel}, ubicada en el Municipio '
+        f'Quien suscribe {director_nombre}, titular de la Cedula de Identidad N\u00b0 {director_cedula}, '
+        f'Director(a) de la Instituci\u00f3n Educativa {nombre_plantel}, ubicada en el Municipio '
         f'{municipio_plantel} de la Parroquia {parroquia_plantel}, adscrita al Centro de '
         f'Desarrollo de la Calidad Educativa Estadal {centro_estadal}. Por la presente hace constar '
-        f'que el (la) estudiante {nombre_alumno}, titular de la Cédula Escolar N° {cedula_alumno}, '
-        f'Cédula de Identidad N° o Pasaporte N° {documento_alumno}, nacido (a) en el Municipio '
+        f'que el (la) estudiante {nombre_alumno}, titular de la Cedula Escolar N\u00b0 {cedula_alumno}, '
+        f'Cedula de Identidad N\u00b0 o Pasaporte N\u00b0 {documento_alumno}, nacido (a) en el Municipio '
         f'{municipio_alumno} del Estado {estado_alumno}, en fecha {fecha_nacimiento_texto}, '
-        f'cursó el {grado_cursado_frase}, correspondiéndole el literal {literal_final} durante el '
+        f'curs\u00f3 el {grado_cursado_frase}, correspondi\u00e9ndole el literal {literal_final} durante el '
         f'periodo escolar {periodo_escolar}, siendo promovido (a) al {siguiente_grado} del '
-        f'Nivel de Educación Primaria.'
+        f'Nivel de Educaci\u00f3n Primaria.'
     )
 
     fecha_expedicion = constancia_objeto.fecha_expedicion or timezone.localdate()
     expedicion_texto = (
         f'Constancia que se expide en {lugar}, a los '
-        f'{fecha_expedicion.day} días del mes de '
+        f'{fecha_expedicion.day} d\u00edas del mes de '
         f'{MESES[fecha_expedicion.month - 1]} de {fecha_expedicion.year}.'
     )
 
@@ -463,12 +463,7 @@ def generar_xlsx_constancia_procesion(
     constancia_objeto,
     lugar_expedicion_override=None,
 ):
-    """
-    Genera un archivo Excel (.xlsx) con una constancia de prosecución
-    lista para imprimir en tamaño Carta.
-
-    Retorna (io.BytesIO, filename).
-    """
+    """Genera un archivo Excel (.xlsx) con una constancia de prosecución lista para imprimir."""
     datos_inst = _datos_institucionales()
     cuerpo_texto, expedicion_texto, firma_datos = _constancia_excel_body_text(
         alumno_objeto, constancia_objeto, datos_inst, lugar_expedicion_override
@@ -497,7 +492,7 @@ def generar_xlsx_constancia_procesion(
 
     ws.merge_cells('A6:H6')
     celda_titulo = ws['A6']
-    celda_titulo.value = 'CONSTANCIA DE PROSECUCIÓN EN EL NIVEL DE EDUCACIÓN PRIMARIA'
+    celda_titulo.value = 'CONSTANCIA DE PROSECUCI\u00d3N EN EL NIVEL DE EDUCACI\u00d3N PRIMARIA'
     celda_titulo.font = _TITLE_FONT
     celda_titulo.alignment = _TITLE_ALIGN
     ws.row_dimensions[6].height = 30
@@ -527,17 +522,17 @@ def generar_xlsx_constancia_procesion(
     ws.row_dimensions[12].height = 20
 
     firma_inst = (
-        'INSTITUCIÓN EDUCATIVA\n'
+        'INSTITUCI\u00d3N EDUCATIVA\n'
         'DIRECTOR(A)\n\n'
-        f'Nombre y Apellido: {firma_datos["director_institucion_nombre"]}\n'
-        f'Número de C.I.: {firma_datos["director_institucion_cedula"]}\n\n'
+        'Nombre y Apellido: ' + firma_datos['director_institucion_nombre'] + '\n'
+        'N\u00famero de C.I.: ' + firma_datos['director_institucion_cedula'] + '\n\n'
         'Firma y Sello:'
     )
     firma_cdce = (
         'CENTRO DE DESARROLLO DE LA CALIDAD EDUCATIVA ESTADAL\n'
         'DIRECTOR(A)\n\n'
-        f'Nombre y Apellido: {firma_datos["director_cdce_nombre"]}\n'
-        f'Número de C.I.: {firma_datos["director_cdce_cedula"]}\n\n'
+        'Nombre y Apellido: ' + firma_datos['director_cdce_nombre'] + '\n'
+        'N\u00famero de C.I.: ' + firma_datos['director_cdce_cedula'] + '\n\n'
         'Firma y Sello:'
     )
 
@@ -577,16 +572,8 @@ def generar_xlsx_constancia_procesion(
     return buffer, filename
 
 
-def generar_xlsx_constancias_lote(
-    constancias_queryset,
-    lugar_expedicion_override=None,
-):
-    """
-    Genera un archivo Excel (.xlsx) con una pestaña por cada alumno
-    del queryset. Cada pestaña tiene el mismo diseño de impresión.
-
-    Retorna (io.BytesIO, filename).
-    """
+def generar_xlsx_constancias_lote(constancias_queryset, lugar_expedicion_override=None):
+    """Genera un archivo Excel (.xlsx) con una pestaña por cada alumno del queryset."""
     constancias = list(constancias_queryset.select_related('alumno'))
     if not constancias:
         raise ValueError('No hay constancias para generar el lote.')
@@ -633,7 +620,7 @@ def generar_xlsx_constancias_lote(
 
         ws.merge_cells('A6:H6')
         celda_titulo = ws['A6']
-        celda_titulo.value = 'CONSTANCIA DE PROSECUCIÓN EN EL NIVEL DE EDUCACIÓN PRIMARIA'
+        celda_titulo.value = 'CONSTANCIA DE PROSECUCI\u00d3N EN EL NIVEL DE EDUCACI\u00d3N PRIMARIA'
         celda_titulo.font = _TITLE_FONT
         celda_titulo.alignment = _TITLE_ALIGN
         ws.row_dimensions[6].height = 30
@@ -663,17 +650,17 @@ def generar_xlsx_constancias_lote(
         ws.row_dimensions[12].height = 20
 
         firma_inst = (
-            'INSTITUCIÓN EDUCATIVA\n'
+            'INSTITUCI\u00d3N EDUCATIVA\n'
             'DIRECTOR(A)\n\n'
-            f'Nombre y Apellido: {firma_datos["director_institucion_nombre"]}\n'
-            f'Número de C.I.: {firma_datos["director_institucion_cedula"]}\n\n'
+            'Nombre y Apellido: ' + firma_datos['director_institucion_nombre'] + '\n'
+            'N\u00famero de C.I.: ' + firma_datos['director_institucion_cedula'] + '\n\n'
             'Firma y Sello:'
         )
         firma_cdce = (
             'CENTRO DE DESARROLLO DE LA CALIDAD EDUCATIVA ESTADAL\n'
             'DIRECTOR(A)\n\n'
-            f'Nombre y Apellido: {firma_datos["director_cdce_nombre"]}\n'
-            f'Número de C.I.: {firma_datos["director_cdce_cedula"]}\n\n'
+            'Nombre y Apellido: ' + firma_datos['director_cdce_nombre'] + '\n'
+            'N\u00famero de C.I.: ' + firma_datos['director_cdce_cedula'] + '\n\n'
             'Firma y Sello:'
         )
 
