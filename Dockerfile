@@ -30,7 +30,14 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
     && mkdir -p /app/static /app/media \
-    && DJANGO_SECRET_KEY=build-only-dummy-secret-key ALLOWED_HOSTS=localhost python /app/backend/manage.py collectstatic --noinput
+    && DJANGO_SECRET_KEY=build-only-dummy-secret-key \
+       ALLOWED_HOSTS=localhost \
+       DB_PASSWORD=build-only-dummy-password \
+       DB_NAME=dummy \
+       DB_USER=dummy \
+       DB_HOST=localhost \
+       CSRF_TRUSTED_ORIGINS=http://localhost \
+       python /app/backend/manage.py collectstatic --noinput
 
 WORKDIR /app/backend
 
