@@ -9,7 +9,7 @@ import {
   actualizarConfiguracionInstitucional,
   getConstanciaProsecucionAlumno,
   guardarConstanciaProsecucionAlumno,
-  descargarConstanciaProcesionXLSX,
+  descargarConstanciaProcesionDOCX,
 } from '../../api/prosecucion';
 
 const GRADOS_CURSADO = [
@@ -198,18 +198,20 @@ export default function ConstanciaProcesionModal({
     setDescargando(true);
     setError('');
     try {
-      const response = await descargarConstanciaProcesionXLSX(alumno.id_alumno);
-      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const response = await descargarConstanciaProcesionDOCX(alumno.id_alumno);
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Constancia_Prosecucion_${alumno.cedula_escolar || alumno.id_alumno}.xlsx`;
+      a.download = `Constancia_Prosecucion_${alumno.cedula_escolar || alumno.numero_documento_identidad || alumno.id_alumno}.docx`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (e) {
-      setError(e.response?.data?.detail || e.response?.data?.error || JSON.stringify(e.response?.data) || e.message || 'No se pudo descargar el Excel.');
+      setError(e.response?.data?.detail || e.response?.data?.error || JSON.stringify(e.response?.data) || e.message || 'No se pudo descargar el documento Word.');
     } finally {
       setDescargando(false);
     }
@@ -351,9 +353,9 @@ export default function ConstanciaProcesionModal({
             <button
               onClick={handleDescargarXLSX}
               disabled={descargando}
-              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50 text-sm"
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
             >
-              <FileDown className="w-4 h-4" /> Descargar Excel Individual
+              <FileDown className="w-4 h-4" /> {descargando ? 'Descargando...' : 'Descargar Word (.docx)'}
             </button>
           )}
         </div>

@@ -165,9 +165,9 @@ def test_generacion_exitosa_constancia_pdf(api_client, usuario_admin, tablas_com
     response = api_client.get(_url_constancia(alumno.pk))
 
     assert response.status_code == status.HTTP_200_OK  # nosec B101
-    assert 'spreadsheetml.sheet' in response['Content-Type']  # nosec B101
+    assert 'wordprocessingml.document' in response['Content-Type']  # nosec B101
     contenido = b''.join(response.streaming_content)  # nosec B101
-    assert len(contenido) > 0  # Excel file is non-empty  # nosec B101
+    assert len(contenido) > 0  # Word DOCX file is non-empty  # nosec B101
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_cabecera_adjunto_constancia_pdf(api_client, usuario_admin, tablas_compl
     assert 'attachment' in content_disposition  # nosec B101
     assert 'filename=' in content_disposition  # nosec B101
     assert 'Constancia_Prosecucion_' in content_disposition  # nosec B101
-    assert 'CE-CPF-002' in content_disposition  # nosec B101
+    assert 'CE-CPF-002.docx' in content_disposition or 'CE-CPF-002' in content_disposition  # nosec B101
 
 
 # ---------------------------------------------------------------------------

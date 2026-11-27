@@ -55,6 +55,7 @@ urlpatterns = [
     path('calificaciones/prosecucion-final-xlsx/<int:alumno_id>/', DescargaConstanciaProsecucionAPIView.as_view(), name='descarga_constancia_prosecucion_xlsx'),
     path('prosecucion/configuracion/', ConfiguracionInstitucionalAPIView.as_view(), name='configuracion_institucional'),
     path('prosecucion/alumno/<int:alumno_id>/', ConstanciaProsecucionAlumnoAPIView.as_view(), name='constancia_prosecucion_alumno'),
+    path('prosecucion/alumno/<int:alumno_id>/exportar/', DescargaConstanciaProsecucionAPIView.as_view(), name='constancia_prosecucion_alumno_exportar'),
     path('prosecucion/exportar-lote/', ExportarConstanciasLoteAPIView.as_view(), name='exportar_constancias_lote'),
     path('periodos/', PeriodoInscripcionListCreateAPIView.as_view(), name='listar_periodos'),
     path('periodos/publicos/<str:token>/', PeriodoInscripcionPublicoAPIView.as_view(), name='periodo_publico'),

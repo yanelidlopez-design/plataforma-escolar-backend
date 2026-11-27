@@ -48,6 +48,10 @@ from ..reports_procesion import (
     generar_xlsx_constancia_procesion,
     generar_xlsx_constancias_lote,
 )
+from ..reports_docx import (
+    generar_docx_constancia_prosecucion,
+    generar_docx_constancias_lote,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -360,17 +364,21 @@ class ReportesService:
             raise ConstanciaNoEncontradaError()
 
         try:
-            xlsx_buffer, filename = generar_xlsx_constancia_procesion(
+            docx_buffer = generar_docx_constancia_prosecucion(
                 alumno, constancia,
             )
+            cedula = (
+                alumno.cedula_escolar or alumno.numero_documento_identidad or alumno_id
+            )
+            filename = cls._sanitizar_filename(f'Constancia_Prosecucion_{cedula}.docx')
         except Exception:
             logger.debug(
-                'Error generando XLSX de constancia alumno=%s constancia=%s',
+                'Error generando DOCX de constancia alumno=%s constancia=%s',
                 alumno_id, getattr(constancia, 'pk', None), exc_info=True,
             )
-            raise ReporteError('No se pudo generar la constancia XLSX.')
+            raise ReporteError('No se pudo generar la constancia Word (.docx).')
 
-        return xlsx_buffer, filename
+        return docx_buffer, filename
 
     @classmethod
     def generar_constancias_lote_xlsx(
@@ -378,17 +386,18 @@ class ReportesService:
         constancias_queryset,
     ) -> Tuple[io.BytesIO, str]:
         """
-        Genera un XLSX con una pestaña por cada alumno del queryset.
+        Genera un documento Word (.docx) con una constancia por página para cada
+        alumno del queryset.
 
         Retorna (io.BytesIO, filename).
         """
         try:
-            xlsx_buffer, filename = generar_xlsx_constancias_lote(
+            docx_buffer, filename = generar_docx_constancias_lote(
                 constancias_queryset,
             )
         except Exception:
             logger.debug(
-                'Error generando constancias en lote XLSX', exc_info=True,
+                'Error generando constancias en lote DOCX', exc_info=True,
             )
-            raise ReporteError('No se pudo generar el lote de constancias XLSX.')
-        return xlsx_buffer, filename
+            raise ReporteError('No se pudo generar el lote de constancias Word (.docx).')
+        return docx_buffer, filename

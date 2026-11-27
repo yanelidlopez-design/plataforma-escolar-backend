@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BarChart3, FileDown, Mail, GraduationCap } from 'lucide-react';
 import axiosInstance from '../api/axiosInstance';
 import { exportarEstadisticaMensualPDF } from '../api/asistencias';
-import { exportarConstanciasLoteXLSX } from '../api/prosecucion';
+import { exportarConstanciasLoteDOCX } from '../api/prosecucion';
 import { downloadFile } from '../utils/downloadFile';
 
 const mesActual = () => {
@@ -119,12 +119,12 @@ export default function Reportes() {
     setGenerandoLote(true);
     setError('');
     try {
-      const response = await exportarConstanciasLoteXLSX({
+      const response = await exportarConstanciasLoteDOCX({
         grado: filtrosConstancia.grado,
         seccion: filtrosConstancia.seccion,
         periodo: filtrosConstancia.periodo,
       });
-      const filename = `constancias_procesion_${filtrosConstancia.periodo}_grado${filtrosConstancia.grado}_sec${filtrosConstancia.seccion}.xlsx`;
+      const filename = `constancias_procesion_${filtrosConstancia.periodo}_grado${filtrosConstancia.grado}_sec${filtrosConstancia.seccion}.docx`;
       await downloadFile(response, filename);
     } catch (reportError) {
       console.error('Error al exportar constancias en lote:', reportError);
@@ -330,7 +330,7 @@ export default function Reportes() {
               className="btn-primary flex items-center gap-2 w-full"
             >
               <Mail className="h-4 w-4" />
-              {generandoLote ? 'Generando...' : 'Exportar Excel Lote'}
+              {generandoLote ? 'Generando...' : 'Exportar Constancias en Lote (Word .docx)'}
             </button>
           </div>
         </div>

@@ -2218,7 +2218,7 @@ class DescargaConstanciaProsecucionAPIView(APIView):
 
         response = FileResponse(
             xlsx_buffer,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
@@ -2612,7 +2612,7 @@ class ExportarConstanciasLoteAPIView(APIView):
 
             response = FileResponse(
                 xlsx_buffer,
-                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             )
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
             return response

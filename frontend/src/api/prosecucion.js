@@ -24,15 +24,21 @@ export const getConstanciaProsecucionAlumno = (alumnoId, periodoEscolar) =>
 export const guardarConstanciaProsecucionAlumno = (alumnoId, data) =>
   axiosInstance.post(`/academico/prosecucion/alumno/${alumnoId}/`, data);
 
-/** Exportar constancias en lote (Excel multipestaña) */
-export const exportarConstanciasLoteXLSX = ({ grado, seccion, periodo }) =>
+/** Exportar constancias en lote (Word .docx) */
+export const exportarConstanciasLoteDOCX = ({ grado, seccion, periodo }) =>
   axiosInstance.get('/academico/prosecucion/exportar-lote/', {
     params: { grado, seccion, periodo },
     responseType: 'blob',
   });
 
-/** Descargar constancia individual en Excel (.xlsx) */
-export const descargarConstanciaProcesionXLSX = (alumnoId) =>
-  axiosInstance.get(`/academico/calificaciones/prosecucion-final-xlsx/${alumnoId}/`, {
+/** Alias retrocompatible para exportación en lote */
+export const exportarConstanciasLoteXLSX = exportarConstanciasLoteDOCX;
+
+/** Descargar constancia individual en Word (.docx) */
+export const descargarConstanciaProcesionDOCX = (alumnoId) =>
+  axiosInstance.get(`/academico/prosecucion/alumno/${alumnoId}/exportar/`, {
     responseType: 'blob',
   });
+
+/** Alias retrocompatible para descarga individual */
+export const descargarConstanciaProcesionXLSX = descargarConstanciaProcesionDOCX;
